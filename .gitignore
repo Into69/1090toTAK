@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data
+config.json
+*.db
+*.db-shm
+*.db-wal
+tile_cache/
+
+# Distribution
+*.zip
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude
+.claude/

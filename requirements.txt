@@ -1,0 +1,11 @@
+flask>=3.0.0
+flask-socketio>=5.3.6
+waitress>=3.0.0
+pyModeS>=2.14
+pyrtlsdr>=0.3.0
+hackrf>=0.1.0
+# uhd — USRP B205mini/B206mini support. Typically installed via system package:
+#   Ubuntu/Debian: sudo apt install python3-uhd
+#   Conda:         conda install -c conda-forge uhd
+#   PyPI:          pip install uhd  (requires system UHD library present)
+psutil>=5.9.0

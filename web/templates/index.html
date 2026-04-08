@@ -1,0 +1,3631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>1090toTAK v{{ version }}</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- Bootstrap -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"/>
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css"/>
+
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+
+    .navbar { height: 48px; min-height: 48px; z-index: 1100; }
+    .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.05em; }
+
+    #app-container {
+      display: flex;
+      height: calc(100vh - 48px - 28px);
+    }
+
+    /* Map */
+    #map-wrapper { flex: 1; position: relative; }
+    #map { width: 100%; height: 100%; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 360px;
+      min-width: 360px;
+      display: flex;
+      flex-direction: column;
+      background: #1a1d21;
+      border-left: 1px solid #2c2f33;
+      overflow: hidden;
+    }
+
+    #sidebar-header {
+      padding: 8px 12px;
+      background: #141618;
+      border-bottom: 1px solid #2c2f33;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    #aircraft-count {
+      font-size: 0.75rem;
+      color: #8899aa;
+    }
+
+    #aircraft-table-wrapper {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    #aircraft-table {
+      width: 100%;
+      font-size: 0.75rem;
+      color: #cdd0d5;
+      border-collapse: collapse;
+    }
+
+    #aircraft-table thead th {
+      background: #141618;
+      color: #8899aa;
+      padding: 4px 6px;
+      position: sticky;
+      top: 0;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.65rem;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid #2c2f33;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #aircraft-table thead th:hover { color: #fff; }
+    #aircraft-table thead th .sort-icon { opacity: 0.4; }
+    #aircraft-table thead th.sort-asc .sort-icon::after { content: " ▲"; opacity: 1; }
+    #aircraft-table thead th.sort-desc .sort-icon::after { content: " ▼"; opacity: 1; }
+
+    #aircraft-table tbody tr {
+      border-bottom: 1px solid #1f2226;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    #aircraft-table tbody tr:hover { background: #22262b; }
+    #aircraft-table tbody tr.selected { background: #1e3a5f; }
+
+    #aircraft-table tbody td { padding: 4px 6px; white-space: nowrap; }
+    #aircraft-table .emergency { color: #ff4444; font-weight: 700; }
+    #aircraft-table .on-ground { color: #999; }
+
+    /* Section separator row */
+    #aircraft-table tr.section-header td {
+      background: #0f1113;
+      color: #55677a;
+      font-size: 0.6rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 3px 6px;
+      cursor: default;
+      border-top: 1px solid #2c2f33;
+      border-bottom: 1px solid #2c2f33;
+    }
+    #aircraft-table tr.section-header:hover { background: #0f1113; }
+
+    /* Alt color coding */
+    .alt-high { color: #5bc0eb; }
+    .alt-med  { color: #9bc53d; }
+    .alt-low  { color: #fde74c; }
+    .alt-gnd  { color: #8899aa; }
+
+    /* Callsign / FlightAware link */
+    a.cs-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
+    a.cs-link:hover { color: #5bc0eb; text-decoration: underline; }
+
+    /* Detail panel */
+    #detail-panel {
+      border-top: 1px solid #2c2f33;
+      padding: 10px 12px;
+      background: #141618;
+      min-height: 120px;
+      max-height: 220px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      color: #cdd0d5;
+    }
+
+    #detail-panel h6 {
+      color: #fff;
+      font-size: 0.8rem;
+      margin-bottom: 8px;
+    }
+
+    #detail-panel .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+      border-bottom: 1px solid #1f2226;
+    }
+
+    #detail-panel .detail-label { color: #8899aa; }
+    #detail-panel .detail-value { color: #fff; font-family: monospace; }
+
+    /* Spectrum panel */
+
+    /* Status bar */
+    #status-bar {
+      height: 28px;
+      background: #0d0f11;
+      border-top: 1px solid #1f2226;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 0.7rem;
+      color: #8899aa;
+      gap: 20px;
+    }
+
+    #status-bar .status-item { display: flex; align-items: center; gap: 4px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+    .dot-green { background: #3ddc97; }
+    .dot-red   { background: #ff4444; }
+    .dot-yellow { background: #ffc107; }
+    .dot-grey  { background: #555; }
+
+    /* Signal quality popup */
+    #signal-quality-popup {
+      position: absolute;
+      bottom: 30px;
+      left: 10px;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 12px;
+      background: rgba(15, 17, 20, 0.93);
+      border: 1px solid #2c2f33;
+      border-radius: 6px;
+      font-size: 0.73rem;
+      color: #cdd0d5;
+      backdrop-filter: blur(4px);
+      pointer-events: none;
+      max-width: 270px;
+      box-shadow: 0 3px 14px rgba(0,0,0,0.55);
+      animation: sq-fadein 0.25s ease;
+    }
+    @keyframes sq-fadein {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    #signal-quality-popup.sq-overload { border-color: #ff4444; }
+    #signal-quality-popup.sq-weak     { border-color: #ffc107; }
+    .sq-icon-overload { color: #ff4444; font-size: 1.1rem; flex-shrink: 0; }
+    .sq-icon-weak     { color: #ffc107; font-size: 1.1rem; flex-shrink: 0; }
+    .sq-title  { font-weight: 600; color: #fff; line-height: 1.3; }
+    .sq-detail { color: #8899aa; font-size: 0.68rem; margin-top: 1px; }
+
+    /* Custom tooltip */
+    #custom-tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: #1a1d21;
+      border: 1px solid #2c2f33;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 0.7rem;
+      color: #cdd0d5;
+      white-space: pre;
+      font-family: monospace;
+      pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      display: none;
+      line-height: 1.6;
+    }
+    #custom-tooltip .tt-header {
+      color: #8899aa;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid #2c2f33;
+      margin-bottom: 4px;
+      padding-bottom: 3px;
+    }
+    #custom-tooltip .tt-row { color: #cdd0d5; }
+    #custom-tooltip .tt-addr { color: #fff; }
+    #custom-tooltip .tt-meta { color: #8899aa; }
+    #custom-tooltip .tt-active { color: #3ddc97; }
+    #custom-tooltip .tt-idle { color: #ffc107; }
+    #custom-tooltip .tt-empty { color: #556; font-style: italic; }
+
+    /* Aircraft map icon */
+    .aircraft-marker {
+      width: 0;
+      height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .aircraft-arrow {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      transform-origin: center center;
+      filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
+    }
+
+    /* Trail dots */
+    .trail-dot { border-radius: 50%; }
+
+    /* Aircraft hover popup */
+    .ac-popup-wrap .leaflet-popup-content-wrapper {
+      background: rgba(20,22,24,0.93);
+      border: 1px solid #2c2f33;
+      border-radius: 6px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+      color: #cdd0d5;
+      padding: 0;
+    }
+    .ac-popup-wrap .leaflet-popup-tip-container { display: none; }
+    .ac-popup-wrap .leaflet-popup-content { margin: 8px 12px; }
+    .ac-popup { font-size: 0.78rem; line-height: 1.6; white-space: nowrap; }
+    .ac-pop-lbl {
+      display: inline-block;
+      width: 68px;
+      color: #8899aa;
+      font-size: 0.72rem;
+    }
+
+
+    /* ── History panel ─────────────────────────────────────────── */
+    #history-panel {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 1050;
+      background: rgba(13,15,17,0.97);
+      border-bottom: 1px solid #2c2f33;
+      padding: 6px 10px;
+      display: none;
+    }
+    body.history-active #history-panel { display: block; }
+    body.history-active #sidebar       { display: none !important; }
+    .hist-row {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+      font-size: 0.75rem;
+    }
+    .hist-row + .hist-row { margin-top: 5px; }
+    .hist-sep { color: #556; }
+    .hist-dt  { width: 160px !important; font-size: 0.72rem !important;
+                background: #0d0f11; border-color: #2c2f33; color: #cdd0d5; }
+    .hist-dt:focus { border-color: #4e8fd6; box-shadow: none; }
+    #hist-status  { font-size: 0.72rem; color: #8899aa; }
+    #hist-time-lbl{ font-size: 0.72rem; color: #cdd0d5; white-space: nowrap; min-width: 130px; }
+    #hist-slider  { accent-color: #4e8fd6; }
+    .hist-speed-sel { width: 70px !important; font-size: 0.72rem !important;
+                      background: #0d0f11; border-color: #2c2f33; color: #cdd0d5;
+                      padding: 0 4px; }
+    .hist-preset.active { background: #4e8fd6; border-color: #4e8fd6; color: #fff; }
+    #hist-ac-badge {
+      position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+      background: rgba(13,15,17,0.85); border: 1px solid #2c2f33;
+      border-radius: 6px; padding: 4px 10px;
+      font-size: 0.72rem; color: #8899aa; pointer-events: none;
+    }
+
+    /* ── Mobile UI ─────────────────────────────────────────── */
+    body.mobile-ui .navbar { height: 44px; min-height: 44px; }
+
+    body.mobile-ui #app-container {
+      height: calc(100vh - 44px);
+    }
+
+    body.mobile-ui #status-bar { display: none; }
+
+    /* Bottom drawer */
+    body.mobile-ui #sidebar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      width: 100%;
+      min-width: unset;
+      height: 70vh;
+      border-left: none;
+      border-top: 1px solid #2c2f33;
+      border-radius: 14px 14px 0 0;
+      box-shadow: 0 -4px 32px rgba(0,0,0,0.6);
+      z-index: 1500;
+      transform: translateY(calc(100% - 48px));
+      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+      will-change: transform;
+    }
+
+    body.mobile-ui #sidebar.drawer-open {
+      transform: translateY(0);
+    }
+
+    /* Drag pill */
+    .drawer-pill-wrap {
+      display: none;
+      justify-content: center;
+      padding: 7px 0 4px;
+      cursor: grab;
+      flex-shrink: 0;
+    }
+    body.mobile-ui .drawer-pill-wrap { display: flex; }
+    .drawer-pill {
+      width: 40px; height: 4px;
+      background: #3a3f45;
+      border-radius: 2px;
+    }
+
+    /* Touch-friendly rows */
+    body.mobile-ui #aircraft-table tbody td { padding: 9px 6px; font-size: 0.8rem; }
+    body.mobile-ui #aircraft-table thead th { padding: 7px 6px; }
+
+    /* Prevent iOS auto-zoom on inputs */
+    body.mobile-ui input, body.mobile-ui select, body.mobile-ui textarea {
+      font-size: 16px !important;
+    }
+
+    /* ── Modal overrides */
+    /* Raise modal above the mobile bottom drawer (z-index: 1500) */
+    .modal       { z-index: 1600 !important; }
+    .modal-backdrop { z-index: 1590 !important; }
+    .modal-content { background: #1a1d21; border: 1px solid #2c2f33; color: #cdd0d5; }
+    .modal-header { border-bottom: 1px solid #2c2f33; }
+    .modal-footer { border-top: 1px solid #2c2f33; flex-shrink: 0; }
+    /* On fullscreen modal (mobile) the body must scroll within remaining height
+       so the footer is never pushed off-screen.
+       Use 100dvh (dynamic viewport height) so iOS Safari's browser chrome is
+       excluded; fall back to 100vh for older browsers. */
+    .modal-fullscreen .modal-dialog { height: 100vh; height: 100dvh; max-height: 100dvh; }
+    .modal-fullscreen .modal-content { display: flex; flex-direction: column; height: 100%; max-height: 100%; }
+    .modal-fullscreen .modal-body { flex: 1 1 0; overflow-y: auto; min-height: 0; }
+    .modal-fullscreen .modal-footer { position: sticky; bottom: 0; z-index: 1; background: #1a1d21; }
+    .form-control, .form-select {
+      background: #141618;
+      border: 1px solid #2c2f33;
+      color: #cdd0d5;
+    }
+    .form-control:focus, .form-select:focus {
+      background: #141618;
+      color: #fff;
+      border-color: #4e8fd6;
+      box-shadow: 0 0 0 0.15rem rgba(78,143,214,0.25);
+    }
+    .form-label { color: #8899aa; font-size: 0.8rem; }
+    .form-check-input:checked { background-color: #4e8fd6; border-color: #4e8fd6; }
+    .nav-tabs .nav-link { color: #8899aa; border-color: #2c2f33; }
+    .nav-tabs .nav-link.active { background: #141618; color: #fff; border-color: #2c2f33 #2c2f33 #141618; }
+    .input-group-text { background: #0d0f11; border-color: #2c2f33; color: #8899aa; }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #141618; }
+    ::-webkit-scrollbar-thumb { background: #2c2f33; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-dark text-light">
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark bg-black navbar-expand-lg px-3">
+  <span class="navbar-brand">
+    <i class="bi bi-airplane-fill me-1" style="color:#4e8fd6"></i> 1090toTAK <span style="font-size:0.65rem;color:#556;font-weight:400;letter-spacing:0;">v{{ version }}</span>
+  </span>
+  <div class="d-flex align-items-center ms-auto gap-2">
+    <span id="nav-receiver-badge" class="badge bg-secondary">--</span>
+    <button id="btn-history-mode" class="btn btn-sm btn-outline-secondary" title="History & Heatmap">
+      <i class="bi bi-clock-history"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#settings-modal">
+      <i class="bi bi-gear-fill"></i>
+    </button>
+  </div>
+</nav>
+
+<!-- Main -->
+<div id="app-container">
+  <!-- Map -->
+  <div id="map-wrapper">
+    <div id="map"></div>
+
+    <!-- History control panel (absolute, top of map) -->
+    <div id="history-panel">
+      <!-- Row 1: Time range -->
+      <div class="hist-row">
+        <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2" data-hours="1">1h</button>
+        <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2" data-hours="6">6h</button>
+        <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2" data-hours="12">12h</button>
+        <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2 active" data-hours="24">24h</button>
+        <span class="hist-sep">|</span>
+        <input type="datetime-local" id="hist-start" class="form-control form-control-sm hist-dt"/>
+        <span class="hist-sep">–</span>
+        <input type="datetime-local" id="hist-end" class="form-control form-control-sm hist-dt"/>
+        <button id="hist-load-btn" class="btn btn-sm btn-primary py-0">Load</button>
+        <span id="hist-status"></span>
+      </div>
+      <!-- Row 2: Mode + playback -->
+      <div class="hist-row" id="hist-controls-row">
+        <div class="btn-group btn-group-sm" role="group">
+          <button id="hist-mode-playback" class="btn btn-outline-secondary active py-0">⏵ Playback</button>
+          <button id="hist-mode-heatmap"  class="btn btn-outline-secondary py-0">🔥 Heatmap</button>
+        </div>
+        <div id="hist-player" class="d-flex align-items-center gap-2 flex-grow-1">
+          <button id="hist-play-btn" class="btn btn-sm btn-outline-success py-0">▶</button>
+          <input type="range" id="hist-slider" class="form-range flex-grow-1" min="0" max="1000" value="0" style="min-width:80px"/>
+          <span id="hist-time-lbl">—</span>
+          <select id="hist-speed" class="form-select hist-speed-sel">
+            <option value="30">30×</option>
+            <option value="120">120×</option>
+            <option value="300" selected>300×</option>
+            <option value="900">900×</option>
+            <option value="1800">1800×</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- History aircraft count badge -->
+    <div id="hist-ac-badge" class="d-none">— aircraft</div>
+
+    <!-- RTL-SDR signal quality popup (bottom-left) -->
+    <div id="signal-quality-popup">
+      <i id="sq-icon" class="bi"></i>
+      <div>
+        <div id="sq-title" class="sq-title"></div>
+        <div id="sq-detail" class="sq-detail"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="drawer-pill-wrap" id="drawer-handle"><div class="drawer-pill"></div></div>
+    <div id="sidebar-header">
+      <span style="font-size:0.8rem;font-weight:600;color:#cdd0d5;">
+        <i class="bi bi-list-ul me-1"></i>AIRCRAFT
+      </span>
+      <span id="aircraft-count">0 tracked</span>
+    </div>
+
+    <!-- Filter input -->
+    <div style="padding:6px 8px;background:#141618;border-bottom:1px solid #2c2f33;">
+      <input type="text" id="filter-input" class="form-control form-control-sm"
+             placeholder="Filter by callsign or ICAO..." style="font-size:0.75rem;"/>
+    </div>
+
+    <div id="aircraft-table-wrapper">
+      <table id="aircraft-table">
+        <thead>
+          <tr>
+            <th data-col="icao">ICAO <span class="sort-icon"></span></th>
+            <th data-col="callsign">Flight # <span class="sort-icon"></span></th>
+            <th data-col="altitude">Alt <span class="sort-icon"></span></th>
+            <th data-col="ground_speed">Spd <span class="sort-icon"></span></th>
+            <th data-col="track">Hdg <span class="sort-icon"></span></th>
+          </tr>
+        </thead>
+        <tbody id="aircraft-tbody"></tbody>
+      </table>
+    </div>
+
+    <div id="detail-panel">
+      <div style="color:#555;text-align:center;margin-top:20px;">
+        Click an aircraft to view details
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div id="status-bar">
+  <div class="status-item" id="status-item-receiver" data-tooltip="">
+    <span class="dot dot-grey" id="dot-receiver"></span>
+    <span id="status-receiver">Connecting...</span>
+  </div>
+  <div class="status-item">
+    <span class="dot dot-grey" id="dot-tak"></span>
+    <span id="status-tak">TAK disabled</span>
+  </div>
+  <div class="status-item" id="status-item-sbs" data-tooltip="">
+    <span class="dot dot-grey" id="dot-sbs-out"></span>
+    <span id="status-sbs-out">SBS Output stopped</span>
+  </div>
+  <div class="status-item" id="status-item-avr" data-tooltip="">
+    <span class="dot dot-grey" id="dot-avr-out"></span>
+    <span id="status-avr-out">AVR Output stopped</span>
+  </div>
+  <div class="status-item" id="status-item-web" data-tooltip="">
+    <span class="dot dot-grey" id="dot-web"></span>
+    <span id="status-web">Web :{{ config.web.port }}</span>
+  </div>
+  <div class="status-item" id="status-item-cpu">
+    <span class="dot dot-grey" id="dot-cpu"></span>
+    <span id="status-cpu">CPU —</span>
+  </div>
+  <div class="status-item" id="status-item-mem">
+    <span class="dot dot-grey" id="dot-mem"></span>
+    <span id="status-mem">MEM —</span>
+  </div>
+  <div class="status-item ms-auto">
+    <i class="bi bi-reception-4"></i>
+    <span id="status-msg-count">0 msg</span>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal fade" id="settings-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-gear me-2"></i>Settings</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3" id="settings-tabs">
+          <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-receiver">Receiver</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-tak">TAK</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-display">Display</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-servers">Servers</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-location">Location</a></li>
+        </ul>
+
+        <div class="tab-content">
+
+          <!-- Receiver Tab -->
+          <div class="tab-pane fade show active" id="tab-receiver">
+            <div class="row g-3">
+              {% if not has_rtlsdr %}
+              <div class="col-12">
+                <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
+                  <i class="bi bi-info-circle me-1"></i>
+                  <strong>pyrtlsdr not installed.</strong>
+                  Direct RTL-SDR source is unavailable.
+                  <code style="display:block;margin-top:4px;">pip install pyrtlsdr</code>
+                </div>
+              </div>
+              {% endif %}
+              {% if not has_hackrf %}
+              <div class="col-12">
+                <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
+                  <i class="bi bi-info-circle me-1"></i>
+                  <strong>hackrf not installed.</strong>
+                  Direct HackRF source is unavailable.
+                  <code style="display:block;margin-top:4px;">pip install hackrf</code>
+                </div>
+              </div>
+              {% endif %}
+              {% if not has_usrp %}
+              <div class="col-12">
+                <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
+                  <i class="bi bi-info-circle me-1"></i>
+                  <strong>uhd not installed.</strong>
+                  Direct USRP B205mini/B206mini source is unavailable.
+                  <code style="display:block;margin-top:4px;">sudo apt install python3-uhd  # or: pip install uhd</code>
+                </div>
+              </div>
+              {% endif %}
+              <div class="col-md-6">
+                <label class="form-label">Source Type</label>
+                <select class="form-select form-select-sm" id="cfg-receiver-type">
+                  <option value="sbs">SBS (port 30003)</option>
+                  <option value="avr">AVR Raw (port 30002)</option>
+                  <option value="json">JSON API (port 8080) — richest data</option>
+                  <option value="avr_subprocess">Direct RTL-SDR (rtl_adsb subprocess)</option>
+                  <option value="rtlsdr"{% if not has_rtlsdr %} disabled{% endif %}>
+                    Direct RTL-SDR (pyrtlsdr){% if not has_rtlsdr %} — requires pyrtlsdr{% endif %}
+                  </option>
+                  <option value="hackrf"{% if not has_hackrf %} disabled{% endif %}>
+                    Direct HackRF One{% if not has_hackrf %} — requires hackrf{% endif %}
+                  </option>
+                  <option value="usrp"{% if not has_usrp %} disabled{% endif %}>
+                    Direct USRP B205mini / B206mini{% if not has_usrp %} — requires uhd{% endif %}
+                  </option>
+                </select>
+              </div>
+              <div class="col-md-6" id="row-receiver-host">
+                <label class="form-label">Host</label>
+                <input type="text" class="form-control form-control-sm" id="cfg-receiver-host"
+                       placeholder="127.0.0.1"/>
+              </div>
+              <div class="col-md-6" id="row-sbs-port">
+                <label class="form-label">SBS Port</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-sbs-port" value="30003"/>
+              </div>
+              <div class="col-md-6" id="row-avr-port">
+                <label class="form-label">AVR Port</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-avr-port" value="30002"/>
+              </div>
+              <div class="col-md-6" id="row-json-port" style="display:none;">
+                <label class="form-label">JSON API Port</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-json-port" value="8080"/>
+              </div>
+              <div id="row-rtlsdr" style="display:none;" class="col-12">
+                <div class="row g-2">
+                  <div class="col-md-3">
+                    <label class="form-label">Device
+                      <button type="button" class="btn btn-link btn-sm p-0 ms-1" id="rtlsdr-refresh-btn"
+                              title="Refresh device list" style="font-size:0.7rem;color:#8899aa;vertical-align:baseline;">
+                        <i class="bi bi-arrow-clockwise"></i>
+                      </button>
+                    </label>
+                    <select class="form-select form-select-sm" id="cfg-rtlsdr-device">
+                      <option value="0">Device 0</option>
+                    </select>
+                    <div id="rtlsdr-device-hint" style="font-size:0.68rem;color:#8899aa;margin-top:2px;"></div>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <div class="form-check form-switch" style="padding-top:3px;">
+                      <input class="form-check-input" type="checkbox" id="cfg-rtlsdr-agc">
+                      <label class="form-check-label" for="cfg-rtlsdr-agc">Auto Gain (AGC)</label>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Gain (dB)</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-rtlsdr-gain"
+                           value="49.6" step="0.1" min="0" max="49.6"/>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">PPM Correction</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-rtlsdr-ppm" value="0"/>
+                  </div>
+                </div>
+                <!-- Gain preview notification bar -->
+                <div id="gain-preview-bar" style="display:none;margin-top:7px;padding:6px 10px;
+                     background:#0d1520;border:1px solid #4e8fd6;border-radius:4px;
+                     font-size:0.72rem;color:#cdd0d5;display:none;align-items:center;gap:8px;">
+                  <i class="bi bi-lightning-charge-fill" style="color:#4e8fd6;flex-shrink:0;"></i>
+                  <span>Preview active — gain applied to live device</span>
+                  <span id="gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
+                  <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
+                </div>
+              </div>
+              <!-- HackRF settings (shown only when source = hackrf) -->
+              <div id="row-hackrf" style="display:none;" class="col-12">
+                <div class="row g-2">
+                  <div class="col-md-3">
+                    <label class="form-label">Device Index</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-device"
+                           value="0" min="0" max="7" step="1"/>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">LNA Gain (dB)</label>
+                    <select class="form-select form-select-sm" id="cfg-hackrf-lna">
+                      <option value="0">0</option>
+                      <option value="8">8</option>
+                      <option value="16" selected>16</option>
+                      <option value="24">24</option>
+                      <option value="32">32</option>
+                      <option value="40">40</option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">VGA Gain (dB)</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-vga"
+                           value="20" step="2" min="0" max="62"/>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">PPM Correction</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-ppm" value="0"/>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">&nbsp;</label>
+                    <div class="form-check form-switch" style="padding-top:3px;">
+                      <input class="form-check-input" type="checkbox" id="cfg-hackrf-amp">
+                      <label class="form-check-label" for="cfg-hackrf-amp">RF Amplifier (~14 dB)</label>
+                    </div>
+                  </div>
+                </div>
+                <!-- HackRF gain preview bar -->
+                <div id="hackrf-gain-preview-bar" style="display:none;margin-top:7px;padding:6px 10px;
+                     background:#0d1520;border:1px solid #4e8fd6;border-radius:4px;
+                     font-size:0.72rem;color:#cdd0d5;display:none;align-items:center;gap:8px;">
+                  <i class="bi bi-lightning-charge-fill" style="color:#4e8fd6;flex-shrink:0;"></i>
+                  <span>Preview active — gain applied to live device</span>
+                  <span id="hackrf-gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
+                  <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
+                </div>
+              </div>
+              <!-- USRP settings (shown only when source = usrp) -->
+              <div id="row-usrp" style="display:none;" class="col-12">
+                <div class="row g-2">
+                  <div class="col-md-4">
+                    <label class="form-label">Device Serial</label>
+                    <input type="text" class="form-control form-control-sm" id="cfg-usrp-serial"
+                           placeholder="Leave blank for first found"/>
+                    <div style="font-size:0.68rem;color:#556677;margin-top:2px;">B205mini, B206mini, or any B2xx</div>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">RX Gain (dB) &nbsp;<span id="cfg-usrp-gain-lbl" style="color:#8899aa;font-family:monospace;">40.0</span></label>
+                    <input type="range" class="form-range" id="cfg-usrp-gain"
+                           value="40" step="0.5" min="0" max="76"/>
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label">Antenna</label>
+                    <select class="form-select form-select-sm" id="cfg-usrp-antenna">
+                      <option value="RX2" selected>RX2</option>
+                      <option value="TX/RX">TX/RX</option>
+                    </select>
+                  </div>
+                  <div class="col-md-2">
+                    <label class="form-label">PPM Correction</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-usrp-ppm" value="0"/>
+                  </div>
+                </div>
+                <!-- USRP gain preview bar -->
+                <div id="usrp-gain-preview-bar" style="display:none;margin-top:7px;padding:6px 10px;
+                     background:#0d1520;border:1px solid #4e8fd6;border-radius:4px;
+                     font-size:0.72rem;color:#cdd0d5;align-items:center;gap:8px;">
+                  <i class="bi bi-lightning-charge-fill" style="color:#4e8fd6;flex-shrink:0;"></i>
+                  <span>Preview active — gain applied to live device</span>
+                  <span id="usrp-gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
+                  <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
+                </div>
+              </div>
+              <div id="row-spectrum-tab" style="display:none;" class="col-12">
+                <label class="form-label" style="color:#8899aa;">
+                  <i class="bi bi-activity me-1"></i>Live Spectrum — 1090 MHz ±1 MHz
+                  <button type="button" id="spectrum-peak-reset"
+                          class="btn btn-link btn-sm p-0 ms-2"
+                          style="font-size:0.68rem;color:#556677;vertical-align:baseline;">
+                    Reset peak
+                  </button>
+                </label>
+                <canvas id="spectrum-canvas-tab"
+                        style="width:100%;height:150px;display:block;border-radius:4px;background:#080a0c;"></canvas>
+                <div style="display:flex;align-items:center;gap:16px;margin-top:5px;font-size:0.68rem;">
+                  <span style="color:#556677;">Floor</span>
+                  <span id="sq-spec-floor" style="font-family:monospace;color:#cdd0d5;">—</span>
+                  <span style="color:#556677;">Clip</span>
+                  <span id="sq-spec-clip" style="font-family:monospace;color:#cdd0d5;">—</span>
+                  <span id="sq-spec-badge" class="badge bg-secondary ms-auto" style="font-size:0.65rem;">—</span>
+                </div>
+                <div id="spectrum-tab-hint" style="font-size:0.68rem;color:#556677;margin-top:3px;">
+                  Waiting for data…
+                </div>
+              </div>
+              <!-- JSON API live status (shown only when source=json) -->
+              <div id="row-json-status" class="col-12" style="display:none;">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                    <span style="color:#8899aa"><i class="bi bi-cloud-download me-2"></i>JSON API Status</span>
+                    <span class="badge bg-secondary" id="json-status-badge">Connecting…</span>
+                  </div>
+                  <div class="card-body py-2" style="font-size:0.78rem;color:#8899aa;">
+                    <div id="json-status-url" style="font-family:monospace;margin-bottom:4px;"></div>
+                    <div id="json-status-detail"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Aircraft TTL (seconds)</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-ttl" value="60" min="10"/>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Track history TTL (seconds)</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-history-ttl" value="86400" min="60"/>
+                <div style="font-size:0.68rem;color:#556677;margin-top:3px;">How long position history is kept on disk (default 86400 = 24 h)</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label">History Database</label>
+                <div class="d-flex align-items-center gap-3" style="font-size:0.82rem;">
+                  <span id="db-stats-info">Loading...</span>
+                  <button type="button" class="btn btn-sm btn-outline-danger" id="btn-db-reset">
+                    <i class="bi bi-trash3 me-1"></i>Reset Database
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAK Tab -->
+          <div class="tab-pane fade" id="tab-tak">
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-tak-enabled"/>
+                  <label class="form-check-label" for="cfg-tak-enabled">Enable TAK output</label>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Protocol</label>
+                <select class="form-select form-select-sm" id="cfg-tak-protocol">
+                  <option value="udp">UDP (unicast)</option>
+                  <option value="multicast">UDP Multicast</option>
+                  <option value="tcp">TCP</option>
+                </select>
+              </div>
+              <div class="col-md-5">
+                <label class="form-label">TAK Server IP</label>
+                <input type="text" class="form-control form-control-sm" id="cfg-tak-host"
+                       placeholder="239.2.3.1"/>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Port</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-tak-port"
+                       placeholder="6969"/>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Send Interval (seconds)</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-tak-interval"
+                       value="5" min="1" step="1"/>
+              </div>
+              <div class="col-12">
+                <div class="alert alert-secondary p-2" style="font-size:0.75rem;">
+                  <strong>Common TAK addresses:</strong><br/>
+                  Multicast SA: <code>239.2.3.1:6969</code> &nbsp;|&nbsp;
+                  WinTAK/ATAK direct: TCP to server IP:8087
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Display Tab -->
+          <div class="tab-pane fade" id="tab-display">
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Map Tile Layer</label>
+                <div class="row g-2" id="map-tile-selector">
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="osm" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🗺️</div>
+                      <div style="font-size:0.75rem;">OpenStreetMap</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="satellite" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🛰️</div>
+                      <div style="font-size:0.75rem;">Satellite</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="dark" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🌑</div>
+                      <div style="font-size:0.75rem;">Dark</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="topo" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">⛰️</div>
+                      <div style="font-size:0.75rem;">Topo</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="google_hybrid" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🌐</div>
+                      <div style="font-size:0.75rem;">Google Hybrid</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="google_roads" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🛣️</div>
+                      <div style="font-size:0.75rem;">Google Roads</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="google_terrain" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🏔️</div>
+                      <div style="font-size:0.75rem;">Google Terrain</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="esri_street" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🏙️</div>
+                      <div style="font-size:0.75rem;">Esri Street</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="esri_topo" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🗻</div>
+                      <div style="font-size:0.75rem;">Esri Topo</div>
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3">
+                    <div class="tile-option border rounded p-2 text-center" data-tile="esri_natgeo" style="cursor:pointer;">
+                      <div style="font-size:1.5rem;">🌿</div>
+                      <div style="font-size:0.75rem;">Esri NatGeo</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 mt-2">
+                <label class="form-label">Tile Cache</label>
+                <div class="d-flex align-items-center gap-3" style="font-size:0.8rem;color:#8899aa;">
+                  <span id="tile-cache-size">Calculating…</span>
+                  <button class="btn btn-sm btn-outline-danger py-0 px-2" id="btn-clear-tile-cache"
+                          style="font-size:0.75rem;" disabled>Clear cache</button>
+                  <span id="tile-cache-status" style="color:#9bc53d;display:none;"></span>
+                </div>
+              </div>
+              <div class="col-12 mt-2">
+                <label class="form-label">Aircraft Icon</label>
+                <div class="row g-2" id="icon-type-selector">
+                  <div class="col-3">
+                    <div class="icon-option border rounded p-2 text-center" data-icon="arrow" style="cursor:pointer;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+                        <polygon points="12,2 16,20 12,16 8,20" fill="#5bc0eb" stroke="#000" stroke-width="1"/>
+                        <polygon points="7,10 12,7 17,10 17,12 12,8 7,12" fill="#5bc0eb" stroke="#000" stroke-width="0.5"/>
+                      </svg>
+                      <div style="font-size:0.7rem;margin-top:3px;">Arrow</div>
+                    </div>
+                  </div>
+                  <div class="col-3">
+                    <div class="icon-option border rounded p-2 text-center" data-icon="plane" style="cursor:pointer;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+                        <path d="M15,1 C16.2,4 16.5,9 16.5,15 C16.5,21 16,25 15,29 C14,25 13.5,21 13.5,15 C13.5,9 13.8,4 15,1Z" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+                        <path d="M15,11 L1,20 L3,22 L13.5,17 L16.5,17 L27,22 L29,20 L15,11Z" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+                        <path d="M15,22 L9,26.5 L10.5,27.5 L15,25 L19.5,27.5 L21,26.5 L15,22Z" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+                      </svg>
+                      <div style="font-size:0.7rem;margin-top:3px;">Plane</div>
+                    </div>
+                  </div>
+                  <div class="col-3">
+                    <div class="icon-option border rounded p-2 text-center" data-icon="heli" style="cursor:pointer;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+                        <ellipse cx="15" cy="14" rx="6" ry="7" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="0.8"/>
+                        <line x1="4" y1="14" x2="26" y2="14" stroke="#5bc0eb" stroke-width="2.5" stroke-linecap="round"/>
+                        <line x1="15" y1="3"  x2="15" y2="25" stroke="#5bc0eb" stroke-width="2.5" stroke-linecap="round"/>
+                        <rect x="12" y="20" width="6" height="8" rx="1" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+                        <line x1="13" y1="27" x2="17" y2="27" stroke="#5bc0eb" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                      <div style="font-size:0.7rem;margin-top:3px;">Helicopter</div>
+                    </div>
+                  </div>
+                  <div class="col-3">
+                    <div class="icon-option border rounded p-2 text-center" data-icon="dot" style="cursor:pointer;">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+                        <circle cx="15" cy="15" r="8" fill="#5bc0eb" stroke="rgba(0,0,0,0.7)" stroke-width="1.2"/>
+                      </svg>
+                      <div style="font-size:0.7rem;margin-top:3px;">Dot</div>
+                    </div>
+                  </div>
+                  <div class="col-3">
+                    <div class="icon-option border rounded p-2 text-center" data-icon="milsymbol" style="cursor:pointer;">
+                      <div id="milsymbol-preview" style="width:30px;height:30px;margin:0 auto;display:flex;align-items:center;justify-content:center;"></div>
+                      <div style="font-size:0.7rem;margin-top:3px;">TAK/2525</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch mt-1">
+                  <input class="form-check-input" type="checkbox" id="cfg-auto-view"
+                    onchange="document.getElementById('cfg-zoom-adjust-row').style.display=this.checked?'':'none'"/>
+                  <label class="form-check-label" for="cfg-auto-view">
+                    Auto View
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                      Automatically fit the map to show all aircraft with a known position
+                    </span>
+                  </label>
+                </div>
+                <div id="cfg-zoom-adjust-row" style="display:none;margin-top:0.5rem;">
+                  <label class="form-label mb-1" style="font-size:0.82rem;">
+                    Zoom adjust: <span id="cfg-zoom-adjust-val">0</span>
+                  </label>
+                  <input type="range" class="form-range" id="cfg-zoom-adjust"
+                    min="-1" max="3" step="1" value="0"
+                    oninput="document.getElementById('cfg-zoom-adjust-val').textContent=this.value"/>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Servers Tab -->
+          <div class="tab-pane fade" id="tab-servers">
+            <div class="row g-3">
+
+              <!-- SBS Output Server -->
+              <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                    <span style="color:#8899aa"><i class="bi bi-broadcast me-2"></i>SBS Output Server</span>
+                    <span class="badge bg-secondary" id="sbs-server-badge">Stopped</span>
+                  </div>
+                  <div class="card-body py-2">
+                    <div class="row g-2 align-items-center">
+                      <div class="col-auto">
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input" type="checkbox" id="cfg-sbs-server-enabled"/>
+                          <label class="form-check-label" for="cfg-sbs-server-enabled">Enable</label>
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label mb-1" style="font-size:0.8rem;">Port</label>
+                        <input type="number" class="form-control form-control-sm" id="cfg-sbs-server-port" value="30003"/>
+                      </div>
+                      <div class="col-12">
+                        <small class="text-muted">Streams BaseStation/SBS MSG lines. Compatible with Virtual Radar Server, PlaneFinder, and other SBS clients.</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- AVR Output Server -->
+              <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                    <span style="color:#8899aa"><i class="bi bi-broadcast me-2"></i>AVR Output Server</span>
+                    <span class="badge bg-secondary" id="avr-server-badge">Stopped</span>
+                  </div>
+                  <div class="card-body py-2">
+                    <div class="row g-2 align-items-center">
+                      <div class="col-auto">
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input" type="checkbox" id="cfg-avr-server-enabled"/>
+                          <label class="form-check-label" for="cfg-avr-server-enabled">Enable</label>
+                        </div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label mb-1" style="font-size:0.8rem;">Port</label>
+                        <input type="number" class="form-control form-control-sm" id="cfg-avr-server-port" value="30002"/>
+                      </div>
+                      <div class="col-12">
+                        <small class="text-muted">Streams raw AVR hex frames (*HEX;). Only active when source is AVR Raw or Direct RTL-SDR.</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Web Server -->
+              <div class="col-12">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                    <span style="color:#8899aa"><i class="bi bi-globe me-2"></i>Web Server</span>
+                    <span class="badge bg-success" id="web-server-badge">:{{ config.web.port }}</span>
+                  </div>
+                  <div class="card-body py-2">
+                    <small class="text-muted">Web UI &amp; Socket.IO — always running on port {{ config.web.port }}.</small>
+                  </div>
+                </div>
+              </div>
+
+              <!-- App Updates -->
+              <div class="col-12" id="update-card">
+                <div class="card bg-dark border-secondary">
+                  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                    <span style="color:#8899aa"><i class="bi bi-cloud-arrow-down me-2"></i>App Updates</span>
+                    <span class="badge bg-secondary" id="update-badge" data-tooltip="">—</span>
+                  </div>
+                  <div class="card-body py-2">
+                    <div class="row g-2 align-items-end mb-2">
+                      <div class="col">
+                        <label class="form-label mb-1" style="font-size:0.8rem;">Update Server Host</label>
+                        <input type="text" class="form-control form-control-sm" id="cfg-update-host" placeholder="e.g. 192.168.1.10"/>
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label mb-1" style="font-size:0.8rem;">Port</label>
+                        <input type="number" class="form-control form-control-sm" id="cfg-update-port" value="8080"/>
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                      <button class="btn btn-sm btn-outline-secondary" id="btn-update-check" onclick="checkForUpdates()">Check Now</button>
+                      <button class="btn btn-sm btn-warning" id="btn-update-pull" style="display:none" onclick="pullUpdate()">Update Now</button>
+                      <button class="btn btn-sm btn-success" id="btn-update-restart" style="display:none" onclick="restartApp()">Restart Now</button>
+                    </div>
+                    <div id="update-log" style="display:none;max-height:150px;overflow-y:auto;font-size:0.78rem;font-family:monospace;background:#111;border-radius:4px;padding:6px 8px;" class="mb-2"></div>
+                    <small class="text-muted" id="update-status-text">Enter an update server host to check for updates.</small>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Location Tab -->
+          <div class="tab-pane fade" id="tab-location">
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Location Source</label>
+                <select class="form-select form-select-sm" id="cfg-location-mode">
+                  <option value="none">None — no sensor location</option>
+                  <option value="manual">Manual — enter coordinates</option>
+                  <option value="gpsd"{% if not has_gpsd %} disabled{% endif %}>
+                    GPSd — use GPS daemon{% if not has_gpsd %} (not reachable){% endif %}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Manual coords -->
+              <div id="row-location-manual" style="display:none;" class="col-12">
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <label class="form-label">Latitude (decimal)</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-location-lat"
+                           step="0.000001" placeholder="e.g. 35.123456"/>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Longitude (decimal)</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-location-lon"
+                           step="0.000001" placeholder="e.g. -97.654321"/>
+                  </div>
+                </div>
+              </div>
+
+              <!-- GPSd options -->
+              <div id="row-location-gpsd" style="display:none;" class="col-12">
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <label class="form-label">GPSd Host</label>
+                    <input type="text" class="form-control form-control-sm" id="cfg-gpsd-host"
+                           placeholder="127.0.0.1"/>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">GPSd Port</label>
+                    <input type="number" class="form-control form-control-sm" id="cfg-gpsd-port"
+                           value="2947"/>
+                  </div>
+                  <div class="col-12">
+                    <div id="gpsd-status" style="font-size:0.75rem;color:#8899aa;">
+                      <span id="gpsd-fix-text">No fix yet</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <small class="text-muted">
+                  When set, your sensor location is shown on the map as a house marker.
+                </small>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="save-settings-btn">
+          <i class="bi bi-check2 me-1"></i>Save & Apply
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/milsymbol@2.2.0/dist/milsymbol.js"></script>
+
+<script>
+// ============================================================
+// TILE LAYERS
+// ============================================================
+const TILE_LAYERS = {
+  osm:           { url: "/tiles/osm/{z}/{x}/{y}",           opts: { maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>' } },
+  satellite:     { url: "/tiles/satellite/{z}/{x}/{y}",     opts: { maxZoom: 19, attribution: '&copy; Esri' } },
+  dark:          { url: "/tiles/dark/{z}/{x}/{y}",          opts: { maxZoom: 19, attribution: '&copy; <a href="https://carto.com">CARTO</a>' } },
+  topo:          { url: "/tiles/topo/{z}/{x}/{y}",          opts: { maxZoom: 17, attribution: '&copy; OpenTopoMap' } },
+  google_hybrid: { url: "/tiles/google_hybrid/{z}/{x}/{y}", opts: { maxZoom: 20, attribution: '&copy; Google' } },
+  google_roads:  { url: "/tiles/google_roads/{z}/{x}/{y}",  opts: { maxZoom: 20, attribution: '&copy; Google' } },
+  google_terrain:{ url: "/tiles/google_terrain/{z}/{x}/{y}",opts: { maxZoom: 15, attribution: '&copy; Google' } },
+  esri_street:   { url: "/tiles/esri_street/{z}/{x}/{y}",   opts: { maxZoom: 19, attribution: '&copy; Esri' } },
+  esri_topo:     { url: "/tiles/esri_topo/{z}/{x}/{y}",     opts: { maxZoom: 19, attribution: '&copy; Esri' } },
+  esri_natgeo:   { url: "/tiles/esri_natgeo/{z}/{x}/{y}",   opts: { maxZoom: 16, attribution: '&copy; Esri &amp; National Geographic' } },
+};
+
+// ============================================================
+// MAP INIT
+// ============================================================
+const map = L.map("map", {
+  center: [39.5, -98.35],
+  zoom: 5,
+  zoomControl: true,
+  preferCanvas: true
+});
+
+map.on("click", () => {
+  if (selectedIcao) {
+    selectedIcao = null;
+    renderDetail(null);
+    clearTrack();
+    renderTable();
+  }
+});
+
+let currentTileLayer = null;
+
+function setTileLayer(type) {
+  if (currentTileLayer) map.removeLayer(currentTileLayer);
+  const def = TILE_LAYERS[type] || TILE_LAYERS.osm;
+  currentTileLayer = L.tileLayer(def.url, def.opts).addTo(map);
+  document.querySelectorAll(".tile-option").forEach(el => {
+    el.classList.toggle("border-primary", el.dataset.tile === type);
+    el.classList.toggle("border-secondary", el.dataset.tile !== type);
+  });
+}
+
+setTileLayer("{{ config.web.map_type }}");
+
+// ============================================================
+// AIRCRAFT ICON
+// ============================================================
+function altClass(alt, onGround) {
+  if (onGround) return "#888888";
+  if (alt == null) return "#aaaaaa";
+  if (alt > 25000) return "#5bc0eb";
+  if (alt > 10000) return "#9bc53d";
+  if (alt > 3000)  return "#fde74c";
+  return "#ff9800";
+}
+
+let iconType = "{{ config.web.icon_type }}";
+
+const ICON_DEFS = {
+  // Default chevron arrow — direction of travel is obvious at a glance
+  arrow: {
+    size: [24, 24], anchor: [12, 12],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <polygon points="12,2 16,20 12,16 8,20" fill="${color}" stroke="#000" stroke-width="1"/>
+        <polygon points="7,10 12,7 17,10 17,12 12,8 7,12" fill="${color}" stroke="#000" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Top-down airliner silhouette — fuselage, swept wings, horizontal stabilisers
+  plane: {
+    size: [30, 30], anchor: [15, 15],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <path d="M15,1 C16.2,4 16.5,9 16.5,15 C16.5,21 16,25 15,29 C14,25 13.5,21 13.5,15 C13.5,9 13.8,4 15,1Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,11 L1,20 L3,22 L13.5,17 L16.5,17 L27,22 L29,20 L15,11Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,22 L9,26.5 L10.5,27.5 L15,25 L19.5,27.5 L21,26.5 L15,22Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Small plane — light / small aircraft (A1, A2, B4)
+  plane_sm: {
+    size: [22, 22], anchor: [11, 11],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 30 30"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <path d="M15,1 C16.2,4 16.5,9 16.5,15 C16.5,21 16,25 15,29 C14,25 13.5,21 13.5,15 C13.5,9 13.8,4 15,1Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,11 L1,20 L3,22 L13.5,17 L16.5,17 L27,22 L29,20 L15,11Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,22 L9,26.5 L10.5,27.5 L15,25 L19.5,27.5 L21,26.5 L15,22Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Large plane — heavy / high-vortex aircraft (A4, A5)
+  plane_lg: {
+    size: [38, 38], anchor: [19, 19],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 30 30"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <path d="M15,1 C16.2,4 16.5,9 16.5,15 C16.5,21 16,25 15,29 C14,25 13.5,21 13.5,15 C13.5,9 13.8,4 15,1Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,11 L1,20 L3,22 L13.5,17 L16.5,17 L27,22 L29,20 L15,11Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,22 L9,26.5 L10.5,27.5 L15,25 L19.5,27.5 L21,26.5 L15,22Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Fighter jet — delta wing silhouette (A6 high-performance)
+  jet: {
+    size: [26, 26], anchor: [13, 13],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <path d="M13,1 C13.8,3 14,7 14,13 C14,18 13.8,22 13,25 C12.2,22 12,18 12,13 C12,7 12.2,3 13,1Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M13,10 L1,22 L4,23 L12,17 L14,17 L22,23 L25,22 L13,10Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M13,21 L10,24.5 L11,25 L13,23.5 L15,25 L16,24.5 L13,21Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Glider — long narrow wings, slim fuselage (B1)
+  glider: {
+    size: [30, 30], anchor: [15, 15],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <path d="M15,2 C15.6,5 15.8,9 15.8,15 C15.8,21 15.4,25 15,28 C14.6,25 14.2,21 14.2,15 C14.2,9 14.4,5 15,2Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,12 L0,16 L1,17.5 L14.2,15 L15.8,15 L29,17.5 L30,16 L15,12Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <path d="M15,24 L11,27 L12,27.8 L15,26 L18,27.8 L19,27 L15,24Z"
+              fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+      </svg>`
+  },
+
+  // Top-down helicopter — oval body, main rotor cross, tail boom
+  heli: {
+    size: [30, 30], anchor: [15, 15],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <ellipse cx="15" cy="14" rx="6" ry="7" fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.8"/>
+        <line x1="4" y1="14" x2="26" y2="14" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="15" y1="3"  x2="15" y2="25" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="4" y1="14" x2="26" y2="14" stroke="rgba(0,0,0,0.4)" stroke-width="0.6"/>
+        <line x1="15" y1="3"  x2="15" y2="25" stroke="rgba(0,0,0,0.4)" stroke-width="0.6"/>
+        <rect x="12" y="20" width="6" height="8" rx="1" fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+        <line x1="15" y1="28" x2="15" y2="26" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+        <line x1="13" y1="27" x2="17" y2="27" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>`
+  },
+
+  // Simple dot — useful when map is zoomed out and cluttered
+  dot: {
+    size: [14, 14], anchor: [7, 7],
+    svg: (_deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"
+        style="filter:drop-shadow(0 0 1px rgba(0,0,0,.8))">
+        <circle cx="7" cy="7" r="5" fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="1.2"/>
+      </svg>`
+  },
+
+  // Top-down quadcopter — central body, 4 arms, 4 rotors (for UAV / drone)
+  drone: {
+    size: [24, 24], anchor: [12, 12],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <line x1="5"  y1="5"  x2="19" y2="19" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+        <line x1="19" y1="5"  x2="5"  y2="19" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="5"  cy="5"  r="3.5" fill="${color}" stroke="rgba(0,0,0,0.6)" stroke-width="0.5" opacity="0.7"/>
+        <circle cx="19" cy="5"  r="3.5" fill="${color}" stroke="rgba(0,0,0,0.6)" stroke-width="0.5" opacity="0.7"/>
+        <circle cx="5"  cy="19" r="3.5" fill="${color}" stroke="rgba(0,0,0,0.6)" stroke-width="0.5" opacity="0.7"/>
+        <circle cx="19" cy="19" r="3.5" fill="${color}" stroke="rgba(0,0,0,0.6)" stroke-width="0.5" opacity="0.7"/>
+        <circle cx="12" cy="12" r="3"   fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.8"/>
+      </svg>`
+  },
+
+  // Ground vehicle — rounded rectangle body with wheels (for surface vehicles)
+  ground: {
+    size: [20, 20], anchor: [10, 10],
+    svg: (deg, color) => `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"
+        style="transform:rotate(${deg}deg);transform-origin:center;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))">
+        <rect x="5" y="3" width="10" height="14" rx="3" fill="${color}" stroke="rgba(0,0,0,0.7)" stroke-width="0.8"/>
+        <circle cx="7"  cy="5"  r="1.8" fill="rgba(0,0,0,0.35)"/>
+        <circle cx="13" cy="5"  r="1.8" fill="rgba(0,0,0,0.35)"/>
+        <circle cx="7"  cy="15" r="1.8" fill="rgba(0,0,0,0.35)"/>
+        <circle cx="13" cy="15" r="1.8" fill="rgba(0,0,0,0.35)"/>
+      </svg>`
+  },
+};
+
+// ── MIL-STD-2525 / milsymbol support ────────────────────────────────────────
+const EMERGENCY_SQUAWKS = ["7500", "7600", "7700"];
+
+// ── ADS-B category → icon override ──────────────────────────────────────────
+// Maps every recognized category to a specific ICON_DEFS key.
+// Categories not listed (A0, B0, B2, B3, B5, C0, C3-C7, D*) use the user's default.
+const CATEGORY_ICON_MAP = {
+  "A1": "plane_sm",  // Light (< 15,500 lbs)
+  "A2": "plane_sm",  // Small (15,500–75,000 lbs)
+  "A3": "plane",     // Large (75,000–300,000 lbs)
+  "A4": "plane_lg",  // High vortex large
+  "A5": "plane_lg",  // Heavy (> 300,000 lbs)
+  "A6": "jet",       // High performance (> 5g, > 400 kts)
+  "A7": "heli",      // Rotorcraft
+  "B1": "glider",    // Glider / sailplane
+  "B4": "plane_sm",  // Ultralight / hang-glider / paraglider
+  "B6": "drone",     // UAV / drone
+  "B7": "drone",     // Space / trans-atmospheric
+  "C1": "ground",    // Emergency vehicle
+  "C2": "ground",    // Service vehicle
+};
+
+const CATEGORY_NAMES = {
+  "A1": "Light",       "A2": "Small",         "A3": "Large",
+  "A4": "High vortex", "A5": "Heavy",         "A6": "High perf",
+  "A7": "Rotorcraft",
+  "B1": "Glider",      "B2": "Lighter-than-air", "B3": "Parachutist",
+  "B4": "Ultralight",  "B6": "UAV",           "B7": "Space",
+  "C1": "Emergency veh", "C2": "Service veh", "C3": "Obstacle",
+};
+
+function iconKeyForAc(ac) {
+  // "dot" mode is intentionally minimal — no category overrides
+  if (iconType === "dot") return "dot";
+  const cat = (ac.category || "").toUpperCase();
+  if (cat && CATEGORY_ICON_MAP.hasOwnProperty(cat)) return CATEGORY_ICON_MAP[cat];
+  return iconType;
+}
+
+function cotTypeForAc(ac) {
+  if (ac.squawk && EMERGENCY_SQUAWKS.includes(ac.squawk)) return "a-u-A";
+  const cat = (ac.category || "").toUpperCase();
+  if (cat === "A7") return "a-f-A-M-H";                  // Rotorcraft
+  if (cat === "B6" || cat === "B7") return "a-f-A-M-F-U"; // UAV / space
+  return "a-f-A-M-F-Q";                                   // Default fixed-wing
+}
+
+const COT_TO_SIDC = {
+  "a-f-A-M-F-Q": "SFAPMFQ--------",  // friendly fixed-wing
+  "a-f-A-M-H":   "SFAPMH---------",  // friendly rotorcraft
+  "a-f-A-M-F-U": "SFAPMFU--------",  // friendly UAV
+  "a-u-A":       "SUAP-----------",  // unknown air
+};
+
+function makeMilsymbolIcon(ac) {
+  const sidc = COT_TO_SIDC[cotTypeForAc(ac)] || "SFAPMFQ--------";
+  const opts = { size: 30 };
+  if (ac.track != null) opts.direction = ac.track;
+  const sym = new ms.Symbol(sidc, opts);
+  const anchor = sym.getAnchor();
+  const size   = sym.getSize();
+  return L.divIcon({
+    className: "",
+    html: sym.asSVG(),
+    iconSize: [size.width, size.height],
+    iconAnchor: [anchor.x, anchor.y],
+    popupAnchor: [0, -anchor.y],
+  });
+}
+
+function makeIcon(ac) {
+  if (iconType === "milsymbol" && window.ms) return makeMilsymbolIcon(ac);
+  const color = altClass(ac.altitude, ac.on_ground);
+  const deg = ac.track || 0;
+  const key = iconKeyForAc(ac);
+  const def = ICON_DEFS[key] || ICON_DEFS.arrow;
+  return L.divIcon({
+    className: "",
+    html: def.svg(deg, color),
+    iconSize: def.size,
+    iconAnchor: def.anchor,
+    popupAnchor: [0, -def.anchor[1]],
+  });
+}
+
+function refreshAllMarkers() {
+  for (const [icao, marker] of Object.entries(markers)) {
+    const ac = aircraft[icao];
+    if (ac) marker.setIcon(makeIcon(ac));
+  }
+}
+
+// ============================================================
+// AIRCRAFT STATE
+// ============================================================
+const aircraft = {};   // icao -> data
+const markers  = {};   // icao -> L.marker
+let selectedIcao = null;
+let trackLayer = null; // Leaflet polyline for selected aircraft's history
+let sortCol = "callsign";
+let sortAsc = true;
+let filterText = "";
+let totalMsgCount = 0;
+
+function formatAlt(alt, onGround) {
+  if (onGround) return '<span class="alt-gnd">GND</span>';
+  if (alt == null) return "—";
+  const cls = alt > 25000 ? "alt-high" : alt > 10000 ? "alt-med" : "alt-low";
+  return `<span class="${cls}">${alt.toLocaleString()}ft</span>`;
+}
+
+function formatSpd(spd) { return spd != null ? spd + "kt" : "—"; }
+function fmtCallsign(cs, noLink) {
+  if (!cs) return noLink ? "—" : '<span style="color:#555">—</span>';
+  const url = "http://www.flightaware.com/live/flight/" + encodeURIComponent(cs.trim());
+  return `<a href="${url}" class="cs-link" target="_blank" rel="noopener" onclick="event.stopPropagation()">${cs}</a>`;
+}
+function formatHdg(hdg) { return hdg != null ? Math.round(hdg) + "°" : "—"; }
+
+function isEmergency(ac) {
+  return ac.squawk && ["7500","7600","7700"].includes(ac.squawk);
+}
+
+// ============================================================
+// MARKER MANAGEMENT
+// ============================================================
+function acPopupHtml(ac) {
+  const rows = [];
+  rows.push(`<div style="font-weight:700;font-size:0.9rem;margin-bottom:4px;">${ac.callsign || ac.icao}</div>`);
+  if (ac.callsign && ac.callsign !== ac.icao)
+    rows.push(`<div><span class="ac-pop-lbl">ICAO</span> ${ac.icao}</div>`);
+  if (ac.on_ground)
+    rows.push(`<div><span class="ac-pop-lbl">Status</span> On ground</div>`);
+  if (ac.altitude != null && !ac.on_ground)
+    rows.push(`<div><span class="ac-pop-lbl">Altitude</span> ${ac.altitude.toLocaleString()} ft</div>`);
+  if (ac.ground_speed != null)
+    rows.push(`<div><span class="ac-pop-lbl">Speed</span> ${ac.ground_speed} kts</div>`);
+  if (ac.track != null)
+    rows.push(`<div><span class="ac-pop-lbl">Heading</span> ${Math.round(ac.track)}&deg;</div>`);
+  if (ac.vertical_rate != null && !ac.on_ground) {
+    const vr = ac.vertical_rate;
+    const arrow = vr > 0 ? "&#9650;" : vr < 0 ? "&#9660;" : "&#9644;";
+    rows.push(`<div><span class="ac-pop-lbl">V/S</span> ${arrow} ${Math.abs(vr).toLocaleString()} fpm</div>`);
+  }
+  if (ac.squawk)
+    rows.push(`<div><span class="ac-pop-lbl">Squawk</span> ${ac.squawk}</div>`);
+  if (ac.category) {
+    const catName = CATEGORY_NAMES[ac.category.toUpperCase()];
+    const catLabel = catName ? `${ac.category} (${catName})` : ac.category;
+    rows.push(`<div><span class="ac-pop-lbl">Category</span> ${catLabel}</div>`);
+  }
+  if (ac.lat != null && ac.lon != null)
+    rows.push(`<div><span class="ac-pop-lbl">Position</span> ${ac.lat.toFixed(4)}, ${ac.lon.toFixed(4)}</div>`);
+  if (ac.age != null)
+    rows.push(`<div><span class="ac-pop-lbl">Last seen</span> ${ac.age < 2 ? "now" : Math.round(ac.age) + "s ago"}</div>`);
+  return `<div class="ac-popup">${rows.join("")}</div>`;
+}
+
+function updateMarker(ac) {
+  if (ac.lat == null || ac.lon == null) return;
+  const latlng = [ac.lat, ac.lon];
+  const icon = makeIcon(ac);
+
+  if (markers[ac.icao]) {
+    markers[ac.icao].setLatLng(latlng).setIcon(icon);
+  } else {
+    const m = L.marker(latlng, { icon })
+      .on("click", () => selectAircraft(ac.icao))
+      .on("mouseover", function () { this.openPopup(); })
+      .on("mouseout",  function () { this.closePopup(); });
+    // Don't add to map while in history mode
+    if (!document.body.classList.contains("history-active")) m.addTo(map);
+    markers[ac.icao] = m;
+  }
+
+  markers[ac.icao]
+    .bindPopup(acPopupHtml(ac), { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
+}
+
+function removeMarker(icao) {
+  if (markers[icao]) {
+    markers[icao].remove();
+    delete markers[icao];
+  }
+}
+
+// ============================================================
+// TABLE RENDERING
+// ============================================================
+function renderTable() {
+  const tbody = document.getElementById("aircraft-tbody");
+  const filter = filterText.toLowerCase();
+
+  let rows = Object.values(aircraft).filter(ac => {
+    if (!filter) return true;
+    return ac.icao.toLowerCase().includes(filter) ||
+           (ac.callsign || "").toLowerCase().includes(filter);
+  });
+
+  const sortFn = (a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (va == null) va = sortAsc ? Infinity : -Infinity;
+    if (vb == null) vb = sortAsc ? Infinity : -Infinity;
+    if (typeof va === "string") va = va.toLowerCase();
+    if (typeof vb === "string") vb = vb.toLowerCase();
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  };
+
+  const withPos    = rows.filter(ac => ac.lat != null).sort(sortFn);
+  const withoutPos = rows.filter(ac => ac.lat == null).sort(sortFn);
+
+  const buildRow = ac => {
+    const emerg = isEmergency(ac) ? "emergency" : "";
+    const gnd   = ac.on_ground ? "on-ground" : "";
+    const sel   = ac.icao === selectedIcao ? "selected" : "";
+    return `<tr class="${emerg} ${gnd} ${sel}" data-icao="${ac.icao}">
+      <td style="font-family:monospace;font-size:0.7rem;">${ac.icao}</td>
+      <td>${fmtCallsign(ac.callsign)}</td>
+      <td>${formatAlt(ac.altitude, ac.on_ground)}</td>
+      <td>${formatSpd(ac.ground_speed)}</td>
+      <td>${formatHdg(ac.track)}</td>
+    </tr>`;
+  };
+
+  const COLS = 5;
+  const sep = label => `<tr class="section-header"><td colspan="${COLS}">${label}</td></tr>`;
+
+  let html = "";
+  if (withPos.length) {
+    html += sep(`With position \u2022 ${withPos.length}`);
+    html += withPos.map(buildRow).join("");
+  }
+  if (withoutPos.length) {
+    html += sep(`No position \u2022 ${withoutPos.length}`);
+    html += withoutPos.map(buildRow).join("");
+  }
+
+  tbody.innerHTML = html;
+
+  // Bind row clicks
+  tbody.querySelectorAll("tr[data-icao]").forEach(row => {
+    row.addEventListener("click", () => selectAircraft(row.dataset.icao));
+  });
+
+  const total = Object.keys(aircraft).length;
+  const posCount = Object.values(aircraft).filter(a => a.lat != null).length;
+  document.getElementById("aircraft-count").textContent =
+    `${total} tracked (${posCount} pos)`;
+
+}
+
+// ============================================================
+// AIRCRAFT SELECTION / DETAIL
+// ============================================================
+function clearTrack() {
+  if (trackLayer) {
+    map.removeLayer(trackLayer);
+    trackLayer = null;
+  }
+}
+
+function fetchTrack(icao) {
+  clearTrack();
+  fetch(`/api/history/${icao}`)
+    .then(r => r.json())
+    .then(pts => {
+      if (pts.length < 2) return;
+      const latlngs = pts.map(p => [p.lat, p.lon]);
+      trackLayer = L.polyline(latlngs, {
+        color: "#5bc0eb",
+        weight: 2,
+        opacity: 0.7,
+        dashArray: null,
+      }).addTo(map);
+    })
+    .catch(() => {});
+}
+
+function selectAircraft(icao) {
+  selectedIcao = icao;
+  renderDetail(aircraft[icao]);
+  renderTable(); // update highlight
+  fetchTrack(icao);
+
+  // Pan to aircraft
+  const ac = aircraft[icao];
+  if (ac && ac.lat != null) {
+    map.panTo([ac.lat, ac.lon]);
+  }
+}
+
+function renderDetail(ac) {
+  const panel = document.getElementById("detail-panel");
+  if (!ac) {
+    panel.innerHTML = '<div style="color:#555;text-align:center;margin-top:20px;">Select an aircraft</div>';
+    return;
+  }
+
+  const catLabel = ac.category
+    ? (CATEGORY_NAMES[ac.category.toUpperCase()]
+       ? `${ac.category} (${CATEGORY_NAMES[ac.category.toUpperCase()]})`
+       : ac.category)
+    : "—";
+
+  const rows = [
+    ["ICAO",     ac.icao],
+    ["Callsign", fmtCallsign(ac.callsign, false)],
+    ["Category", catLabel],
+    ["Position", ac.lat != null ? `${ac.lat.toFixed(4)}, ${ac.lon.toFixed(4)}` : "—"],
+    ["Altitude", ac.altitude != null ? `${ac.altitude.toLocaleString()} ft` : "—"],
+    ["Speed",    ac.ground_speed != null ? `${ac.ground_speed} kts` : "—"],
+    ["Heading",  ac.track != null ? `${Math.round(ac.track)}°` : "—"],
+    ["Vert Rate",ac.vertical_rate != null ? `${ac.vertical_rate > 0 ? "+" : ""}${ac.vertical_rate} fpm` : "—"],
+    ["Squawk",   ac.squawk || "—"],
+    ["Status",   ac.on_ground ? "On Ground" : "Airborne"],
+    ["Age",      ac.age != null ? `${ac.age}s ago` : "—"],
+  ];
+
+  const emerg = isEmergency(ac) ? '<span class="badge bg-danger ms-2">EMERGENCY</span>' : "";
+  panel.innerHTML = `
+    <h6>${ac.callsign ? fmtCallsign(ac.callsign) : ac.icao}${emerg}
+      <button class="btn btn-xs btn-outline-warning btn-sm float-end"
+              style="font-size:0.65rem;padding:1px 6px;"
+              onclick="sendToTak('${ac.icao}')">
+        <i class="bi bi-send"></i> TAK
+      </button>
+    </h6>
+    ${rows.map(([l,v]) => `
+      <div class="detail-row">
+        <span class="detail-label">${l}</span>
+        <span class="detail-value">${v}</span>
+      </div>`).join("")}
+  `;
+}
+
+function sendToTak(icao) {
+  fetch(`/api/tak/send/${icao}`, { method: "POST" })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) showToast(d.message || `Sent ${icao}`, "success");
+      else showToast(`${d.error}`, "danger");
+    })
+    .catch(e => showToast(`Request failed: ${e}`, "danger"));
+}
+
+// ============================================================
+// AUTO VIEW
+// ============================================================
+let autoView = {{ 'true' if config.web.auto_view else 'false' }};
+let zoomAdjust = {{ config.web.zoom_adjust }};
+let aircraftTTL = {{ config.aircraft_ttl }};
+
+function applyAutoView() {
+  if (!autoView) return;
+  if (document.body.classList.contains("history-active")) return;
+  const points = Object.values(aircraft)
+    .filter(ac => ac.lat != null && ac.lon != null)
+    .map(ac => [ac.lat, ac.lon]);
+  if (sensorMarker) points.push(sensorMarker.getLatLng());
+  if (points.length === 0) return;
+
+  // On mobile the bottom drawer peeks up 48px (collapsed) so add extra
+  // bottom padding to keep aircraft visible above it.
+  const mobile = document.body.classList.contains('mobile-ui');
+  const padX = mobile ? 30 : 60;
+  const padTop = mobile ? 30 : 60;
+  const padBottom = mobile ? 80 : 60;  // 48px drawer peek + margin
+
+  if (points.length === 1) {
+    map.setView(points[0], (mobile ? 6 : 8) - zoomAdjust);
+  } else {
+    // Defer one tick so Leaflet has the correct container size after any
+    // layout shifts (especially on first load on mobile).
+    setTimeout(() => {
+      map.invalidateSize({ animate: false });
+      const bounds = L.latLngBounds(points);
+      // Ask Leaflet what zoom it would use to fit the bounds given the padding,
+      // then add zoomAdjust on top of that calculated value.
+      const baseZoom = map.getBoundsZoom(bounds, false,
+        L.point(padX * 2, padTop + padBottom));
+      map.setView(bounds.getCenter(), baseZoom - zoomAdjust - (mobile ? 1 : 0));
+    }, 0);
+  }
+}
+
+// ============================================================
+// SOCKET.IO
+// ============================================================
+const socket = io({ transports: ["polling", "websocket"] });
+
+// Populate aircraft immediately on page load — don't wait for first socket push
+fetch("/api/aircraft")
+  .then(r => r.json())
+  .then(list => {
+    for (const ac of list) {
+      aircraft[ac.icao] = ac;
+      updateMarker(ac);
+    }
+    renderTable();
+    applyAutoView();
+  })
+  .catch(() => {});
+
+socket.on("connect", () => {
+  document.getElementById("nav-receiver-badge").className = "badge bg-success";
+  document.getElementById("nav-receiver-badge").textContent = "LIVE";
+});
+
+socket.on("disconnect", () => {
+  document.getElementById("nav-receiver-badge").className = "badge bg-danger";
+  document.getElementById("nav-receiver-badge").textContent = "OFFLINE";
+});
+
+socket.on("aircraft_remove", data => {
+  // Don't remove aircraft while in history mode — preserve last known positions
+  if (document.body.classList.contains("history-active")) return;
+  const icao = data.icao;
+  delete aircraft[icao];
+  removeMarker(icao);
+  if (selectedIcao === icao) {
+    selectedIcao = null;
+    renderDetail(null);
+    clearTrack();
+  }
+  renderTable();
+});
+
+// ============================================================
+// SPECTRUM
+// ============================================================
+const SPECTRUM_MIN_DB = -80;
+const SPECTRUM_MAX_DB = -10;
+let spectrumData = null;
+let spectrumPeak = null;
+let peakDecayTimer = null;
+
+function drawSpectrumOnCanvas(canvas) {
+  if (!canvas || !spectrumData) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (W === 0 || H === 0) return;
+  if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const PAD = { top: 8, right: 8, bottom: 18, left: 36 };
+  const plotW = W - PAD.left - PAD.right;
+  const plotH = H - PAD.top - PAD.bottom;
+  const bins = spectrumData.length;
+  const dbRange = SPECTRUM_MAX_DB - SPECTRUM_MIN_DB;
+
+  function dbToY(db) {
+    return PAD.top + plotH * (1 - (Math.max(SPECTRUM_MIN_DB, Math.min(SPECTRUM_MAX_DB, db)) - SPECTRUM_MIN_DB) / dbRange);
+  }
+
+  // Background
+  ctx.fillStyle = "#080a0c";
+  ctx.fillRect(0, 0, W, H);
+
+  // Horizontal grid lines (every 10 dB)
+  ctx.strokeStyle = "#1a1d21";
+  ctx.lineWidth = 1;
+  ctx.font = "9px monospace";
+  ctx.fillStyle = "#556677";
+  ctx.textAlign = "right";
+  for (let db = SPECTRUM_MIN_DB; db <= SPECTRUM_MAX_DB; db += 10) {
+    const y = dbToY(db);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + plotW, y); ctx.stroke();
+    ctx.fillText(`${db}`, PAD.left - 3, y + 3);
+  }
+
+  // Frequency axis labels
+  ctx.fillStyle = "#556677";
+  ctx.textAlign = "center";
+  const freqLabels = ["1089", "1089.5", "1090", "1090.5", "1091"];
+  freqLabels.forEach((lbl, i) => {
+    const x = PAD.left + (i / (freqLabels.length - 1)) * plotW;
+    ctx.fillText(lbl, x, H - 3);
+  });
+
+  // Center frequency marker
+  const cx = PAD.left + plotW / 2;
+  ctx.strokeStyle = "rgba(255,68,68,0.5)";
+  ctx.setLineDash([3, 4]);
+  ctx.beginPath(); ctx.moveTo(cx, PAD.top); ctx.lineTo(cx, PAD.top + plotH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Peak hold
+  if (spectrumPeak && spectrumPeak.length === bins) {
+    ctx.strokeStyle = "rgba(61,220,151,0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    spectrumPeak.forEach((v, i) => {
+      const x = PAD.left + (i / (bins - 1)) * plotW;
+      i === 0 ? ctx.moveTo(x, dbToY(v)) : ctx.lineTo(x, dbToY(v));
+    });
+    ctx.stroke();
+  }
+
+  // Spectrum fill
+  ctx.beginPath();
+  spectrumData.forEach((v, i) => {
+    const x = PAD.left + (i / (bins - 1)) * plotW;
+    i === 0 ? ctx.moveTo(x, dbToY(v)) : ctx.lineTo(x, dbToY(v));
+  });
+  const lastX = PAD.left + plotW;
+  ctx.lineTo(lastX, PAD.top + plotH);
+  ctx.lineTo(PAD.left, PAD.top + plotH);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(61,220,151,0.08)";
+  ctx.fill();
+
+  // Spectrum line
+  ctx.strokeStyle = "#3ddc97";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  spectrumData.forEach((v, i) => {
+    const x = PAD.left + (i / (bins - 1)) * plotW;
+    i === 0 ? ctx.moveTo(x, dbToY(v)) : ctx.lineTo(x, dbToY(v));
+  });
+  ctx.stroke();
+}
+
+function drawSpectrum() {
+  drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+}
+
+socket.on("spectrum_update", (data) => {
+  spectrumData = data.bins;
+  if (!spectrumPeak || spectrumPeak.length !== spectrumData.length) {
+    spectrumPeak = [...spectrumData];
+  } else {
+    spectrumPeak = spectrumPeak.map((p, i) => Math.max(p, spectrumData[i]));
+  }
+  const hint = document.getElementById("spectrum-tab-hint");
+  if (hint) hint.textContent = `${data.bins.length} bins · ${(data.sample_rate / 1e6).toFixed(0)} MHz BW · live`;
+  requestAnimationFrame(drawSpectrum);
+});
+
+// Peak hold slow decay — drop 1 dB/s
+setInterval(() => {
+  if (spectrumPeak) spectrumPeak = spectrumPeak.map(v => v - 1);
+}, 1000);
+
+socket.on("signal_quality_update", (data) => {
+  // ── map-overlay popup ───────────────────────────────────────────────────
+  const popup  = document.getElementById("signal-quality-popup");
+  const icon   = document.getElementById("sq-icon");
+  const title  = document.getElementById("sq-title");
+  const detail = document.getElementById("sq-detail");
+  if (popup) {
+    popup.classList.remove("sq-overload", "sq-weak");
+    icon.className = "bi";
+    if (data.status === "overload") {
+      popup.style.display = "flex";
+      popup.classList.add("sq-overload");
+      icon.classList.add("bi-exclamation-triangle-fill", "sq-icon-overload");
+      title.textContent  = "Signal Overload";
+      detail.textContent = `${data.clip_pct.toFixed(1)}% saturated — reduce gain`;
+    } else if (data.status === "weak") {
+      popup.style.display = "flex";
+      popup.classList.add("sq-weak");
+      icon.classList.add("bi-reception-1", "sq-icon-weak");
+      title.textContent  = "Weak Signal";
+      detail.textContent = `Noise floor ${data.noise_floor_dbfs.toFixed(0)} dBFS — check antenna / increase gain`;
+    } else {
+      popup.style.display = "none";
+    }
+  }
+
+  // ── spectrum panel metrics ──────────────────────────────────────────────
+  const floorEl = document.getElementById("sq-spec-floor");
+  const clipEl  = document.getElementById("sq-spec-clip");
+  const badge   = document.getElementById("sq-spec-badge");
+  if (!floorEl) return;
+
+  if (data.status === "none") {
+    floorEl.textContent = "—";
+    clipEl.textContent  = "—";
+    badge.textContent   = "—";
+    badge.className = "badge bg-secondary ms-auto";
+    return;
+  }
+
+  floorEl.textContent = `${data.noise_floor_dbfs.toFixed(1)} dBFS`;
+  clipEl.textContent  = `${data.clip_pct.toFixed(1)}%`;
+
+  if (data.status === "overload") {
+    badge.textContent = "OVERLOAD";
+    badge.className   = "badge ms-auto";
+    badge.style.background = "#ff4444";
+    badge.style.color = "#fff";
+  } else if (data.status === "weak") {
+    badge.textContent = "WEAK";
+    badge.className   = "badge ms-auto";
+    badge.style.background = "#ffc107";
+    badge.style.color = "#000";
+  } else {
+    badge.textContent = "OK";
+    badge.className   = "badge ms-auto";
+    badge.style.background = "#3ddc97";
+    badge.style.color = "#000";
+  }
+});
+
+
+socket.on("aircraft_update", (data) => {
+  lastSocketUpdate = Date.now();
+  totalMsgCount++;
+  document.getElementById("status-msg-count").textContent =
+    `${totalMsgCount} upd`;
+
+  const seen = new Set();
+
+  for (const ac of data.aircraft) {
+    seen.add(ac.icao);
+    aircraft[ac.icao] = ac;
+    updateMarker(ac);
+  }
+
+  const inHistory = document.body.classList.contains("history-active");
+
+  // Remove aircraft that disappeared from the full snapshot (skip in history mode)
+  if (data.full && !inHistory) {
+    for (const icao of Object.keys(aircraft)) {
+      if (!seen.has(icao)) {
+        delete aircraft[icao];
+        removeMarker(icao);
+      }
+    }
+  }
+
+  // Remove aircraft older than TTL (skip in history mode)
+  if (!inHistory) {
+    for (const [icao, ac] of Object.entries(aircraft)) {
+      if (ac.age > aircraftTTL) {
+        delete aircraft[icao];
+        removeMarker(icao);
+      }
+    }
+  }
+
+  renderTable();
+  applyAutoView();
+
+  // Update selected detail if visible
+  if (selectedIcao && aircraft[selectedIcao]) {
+    renderDetail(aircraft[selectedIcao]);
+  }
+});
+
+// Refresh selected aircraft track every 30s so new points appear on the map
+setInterval(() => {
+  if (selectedIcao && aircraft[selectedIcao]) fetchTrack(selectedIcao);
+}, 30000);
+
+// ============================================================
+// STATUS BAR
+// ============================================================
+function setReceiverStatus(connected, label) {
+  const dot = document.getElementById("dot-receiver");
+  const lbl = document.getElementById("status-receiver");
+  dot.className = "dot " + (connected ? "dot-green" : "dot-red");
+  lbl.textContent = label || (connected ? "Connected" : "Disconnected");
+}
+
+function fmtDuration(s) {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function buildClientTooltip(srv) {
+  if (!srv.enabled)
+    return `<span class="tt-empty">Server stopped</span>`;
+  if (!srv.client_list || srv.client_list.length === 0)
+    return `<span class="tt-empty">No clients connected</span>`;
+  const header = `<div class="tt-header">${srv.client_list.length} client${srv.client_list.length !== 1 ? "s" : ""} connected</div>`;
+  const rows = srv.client_list.map(c => {
+    const idleHtml = c.idle < 5
+      ? `<span class="tt-active">active</span>`
+      : `<span class="tt-idle">idle ${c.idle}s</span>`;
+    return `<div class="tt-row"><span class="tt-addr">${c.addr}</span>  <span class="tt-meta">up ${fmtDuration(c.connected_for)}</span>  ${idleHtml}</div>`;
+  }).join("");
+  return header + rows;
+}
+
+// ── Custom tooltip engine ────────────────────────────────────────────────────
+(function () {
+  const tt = document.createElement("div");
+  tt.id = "custom-tooltip";
+  document.body.appendChild(tt);
+
+  function position(e) {
+    const pad = 14;
+    tt.style.left = "0px";
+    tt.style.top  = "0px";
+    tt.style.display = "block";
+    const w = tt.offsetWidth, h = tt.offsetHeight;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + w > window.innerWidth)  x = e.clientX - w - pad;
+    if (y + h > window.innerHeight) y = e.clientY - h - pad;
+    tt.style.left = x + "px";
+    tt.style.top  = y + "px";
+  }
+
+  document.addEventListener("mouseover", e => {
+    const el = e.target.closest("[data-tooltip]");
+    if (!el || !el.dataset.tooltip) { tt.style.display = "none"; return; }
+    tt.innerHTML = el.dataset.tooltip;
+    position(e);
+  });
+  document.addEventListener("mousemove", e => {
+    if (tt.style.display === "block") position(e);
+  });
+  document.addEventListener("mouseout", e => {
+    if (e.target.closest("[data-tooltip]")) tt.style.display = "none";
+  });
+})();
+
+// Poll stats every 3s — updates SBS receiver status + TAK status
+let lastSocketUpdate = Date.now();
+
+setInterval(() => {
+  fetch("/api/stats")
+    .then(r => r.json())
+    .then(s => {
+      // Actual receiver state
+      if (s.receiver) {
+        const conn    = s.receiver.connected;
+        const msgs    = s.receiver.messages || 0;
+        const errs    = s.receiver.errors   || 0;
+        const rej     = s.receiver.rejected || 0;
+        const polls   = s.receiver.polls;
+        const srcMap  = {
+          "sbs": "SBS", "avr": "AVR", "json": "JSON", "avr_subprocess": "rtl_adsb", "rtlsdr": "RTL-SDR"
+        };
+        const src = srcMap[s.receiver.source] || s.receiver.source || "Receiver";
+        let label;
+        if (conn) {
+          label = `${src}: ${msgs} msg` + (errs ? ` (${errs} err)` : "");
+        } else if (errs) {
+          label = `${src}: Disconnected (${errs} retries)`;
+        } else {
+          label = `${src}: Connecting...`;
+        }
+        setReceiverStatus(conn, label);
+        // Tooltip for receiver status item
+        const rxItem = document.getElementById("status-item-receiver");
+        if (rxItem) {
+          let tt = "";
+          if (s.receiver.url) {
+            tt += `<div class="tt-header">${s.receiver.url}</div>`;
+          }
+          const details = [];
+          if (polls != null) details.push(`${polls.toLocaleString()} polls`);
+          details.push(`${msgs.toLocaleString()} aircraft updated`);
+          if (rej)  details.push(`${rej.toLocaleString()} no-field`);
+          if (errs) details.push(`${errs} poll errors`);
+          if (details.length) tt += details.map(d => `<div class="tt-row">${d}</div>`).join("");
+          rxItem.dataset.tooltip = tt;
+        }
+      }
+      // TAK status
+      const takDot = document.getElementById("dot-tak");
+      const takLbl = document.getElementById("status-tak");
+      if (s.tak) {
+        const enabled = s.tak.enabled;
+        takDot.className = "dot " + (enabled ? "dot-green" : "dot-grey");
+        takLbl.textContent = enabled
+          ? `TAK → ${s.tak.host}:${s.tak.port} (${s.tak.sent} sent)`
+          : "TAK disabled";
+      }
+      // Output server badges
+      if (s.servers) {
+        const sbsSrv = s.servers.sbs;
+        const avrSrv = s.servers.avr;
+        const sbsBadge = document.getElementById("sbs-server-badge");
+        const avrBadge = document.getElementById("avr-server-badge");
+        if (sbsBadge) {
+          sbsBadge.className = "badge " + (sbsSrv.enabled ? "bg-success" : "bg-secondary");
+          sbsBadge.textContent = sbsSrv.enabled
+            ? `Listening :${sbsSrv.port} (${sbsSrv.clients} client${sbsSrv.clients !== 1 ? "s" : ""})`
+            : "Stopped";
+        }
+        if (avrBadge) {
+          avrBadge.className = "badge " + (avrSrv.enabled ? "bg-success" : "bg-secondary");
+          avrBadge.textContent = avrSrv.enabled
+            ? `Listening :${avrSrv.port} (${avrSrv.clients} client${avrSrv.clients !== 1 ? "s" : ""})`
+            : "Stopped";
+        }
+        // Status bar dots + labels
+        const sbsDot = document.getElementById("dot-sbs-out");
+        const sbsLbl = document.getElementById("status-sbs-out");
+        const avrDot = document.getElementById("dot-avr-out");
+        const avrLbl = document.getElementById("status-avr-out");
+        const sbsItem = document.getElementById("status-item-sbs");
+        const avrItem = document.getElementById("status-item-avr");
+        if (sbsDot) sbsDot.className = "dot " + (sbsSrv.enabled ? "dot-green" : "dot-grey");
+        if (sbsLbl) sbsLbl.textContent = sbsSrv.enabled
+          ? `SBS Output :${sbsSrv.port} (${sbsSrv.clients} client${sbsSrv.clients !== 1 ? "s" : ""})`
+          : "SBS Output stopped";
+        if (sbsItem) sbsItem.dataset.tooltip = buildClientTooltip(sbsSrv);
+        if (avrDot) avrDot.className = "dot " + (avrSrv.enabled ? "dot-green" : "dot-grey");
+        if (avrLbl) avrLbl.textContent = avrSrv.enabled
+          ? `AVR Output :${avrSrv.port} (${avrSrv.clients} client${avrSrv.clients !== 1 ? "s" : ""})`
+          : "AVR Output stopped";
+        if (avrItem) avrItem.dataset.tooltip = buildClientTooltip(avrSrv);
+      }
+
+      // Web server client status
+      if (s.web) {
+        const webClients = s.web.clients || 0;
+        const webPort    = s.web.port;
+        const webDot     = document.getElementById("dot-web");
+        const webLbl     = document.getElementById("status-web");
+        const webItem    = document.getElementById("status-item-web");
+        const webBadge   = document.getElementById("web-server-badge");
+        if (webDot) webDot.className = "dot " + (webClients > 0 ? "dot-green" : "dot-grey");
+        if (webLbl) webLbl.textContent = webClients > 0
+          ? `Web :${webPort} (${webClients} client${webClients !== 1 ? "s" : ""})`
+          : `Web :${webPort} (no clients)`;
+        if (webItem) webItem.dataset.tooltip = buildClientTooltip({ enabled: true, client_list: s.web.client_list });
+        if (webBadge) {
+          webBadge.className = "badge " + (webClients > 0 ? "bg-success" : "bg-secondary");
+          webBadge.textContent = webClients > 0
+            ? `:${webPort} (${webClients} client${webClients !== 1 ? "s" : ""})`
+            : `:${webPort} (no clients)`;
+        }
+      }
+
+      // JSON API receiver live status card (only relevant when source=json)
+      if (s.receiver && s.receiver.source === "json") {
+        const badge  = document.getElementById("json-status-badge");
+        const urlEl  = document.getElementById("json-status-url");
+        const detEl  = document.getElementById("json-status-detail");
+        if (badge && urlEl && detEl) {
+          const conn  = s.receiver.connected;
+          const msgs  = s.receiver.messages || 0;
+          const errs  = s.receiver.errors   || 0;
+          const polls = s.receiver.polls    || 0;
+          badge.className = "badge " + (conn ? "bg-success" : (errs ? "bg-danger" : "bg-secondary"));
+          badge.textContent = conn ? "Connected" : (errs ? `Error (${errs})` : "Connecting…");
+          if (s.receiver.url) urlEl.textContent = s.receiver.url;
+          const parts = [`${polls.toLocaleString()} polls`, `${msgs.toLocaleString()} aircraft updated`];
+          if (errs) parts.push(`${errs} errors`);
+          if (!conn && s.receiver.last_error) parts.push(s.receiver.last_error);
+          detEl.textContent = parts.join("  ·  ");
+        }
+      }
+
+      if (s.system) {
+        const cpuDot  = document.getElementById("dot-cpu");
+        const cpuLbl  = document.getElementById("status-cpu");
+        const memDot  = document.getElementById("dot-mem");
+        const memLbl  = document.getElementById("status-mem");
+        const cpu = s.system.cpu_pct;
+        const mem = s.system.mem_used_mb;
+        if (cpuDot) cpuDot.className = "dot " + (cpu > 80 ? "dot-red" : cpu > 60 ? "dot-yellow" : "dot-green");
+        if (cpuLbl) cpuLbl.textContent = `CPU ${cpu.toFixed(0)}%`;
+        if (memDot) memDot.className = "dot " + (mem > 500 ? "dot-red" : mem > 200 ? "dot-yellow" : "dot-green");
+        if (memLbl) memLbl.textContent = `MEM ${mem} MB`;
+      }
+
+      // App Updates card — state only applied on explicit Check Now click
+    })
+    .catch(() => {});
+
+  // REST fallback: if no socket update for >8s, poll /api/aircraft directly
+  if (Date.now() - lastSocketUpdate > 8000) {
+    fetch("/api/aircraft")
+      .then(r => r.json())
+      .then(list => {
+        for (const ac of list) {
+          aircraft[ac.icao] = ac;
+          updateMarker(ac);
+        }
+        renderTable();
+        applyAutoView();
+      })
+      .catch(() => {});
+  }
+}, 3000);
+
+// ============================================================
+// SETTINGS MODAL
+// ============================================================
+let appConfig = {};
+
+function loadSettingsForm(cfg) {
+  appConfig = cfg;
+  document.getElementById("cfg-receiver-type").value = cfg.receiver?.type || "sbs";
+  document.getElementById("cfg-receiver-host").value = cfg.receiver?.host || "127.0.0.1";
+  document.getElementById("cfg-sbs-port").value  = cfg.receiver?.sbs_port  || 30003;
+  document.getElementById("cfg-avr-port").value  = cfg.receiver?.avr_port  || 30002;
+  document.getElementById("cfg-json-port").value = cfg.receiver?.json_port || 8080;
+  // device index — set after dropdown is populated
+  document.getElementById("cfg-rtlsdr-device").dataset.pending = cfg.receiver?.rtlsdr_device_index ?? 0;
+  document.getElementById("cfg-rtlsdr-agc").checked  = cfg.receiver?.rtlsdr_agc || false;
+  document.getElementById("cfg-rtlsdr-gain").value   = cfg.receiver?.rtlsdr_gain ?? 49.6;
+  document.getElementById("cfg-rtlsdr-ppm").value    = cfg.receiver?.rtlsdr_ppm ?? 0;
+  document.getElementById("cfg-hackrf-device").value = cfg.receiver?.hackrf_device_index ?? 0;
+  document.getElementById("cfg-hackrf-lna").value    = cfg.receiver?.hackrf_lna_gain ?? 16;
+  document.getElementById("cfg-hackrf-vga").value    = cfg.receiver?.hackrf_vga_gain ?? 20;
+  document.getElementById("cfg-hackrf-ppm").value    = cfg.receiver?.hackrf_ppm ?? 0;
+  document.getElementById("cfg-hackrf-amp").checked  = cfg.receiver?.hackrf_amp || false;
+  const usrpGain = cfg.receiver?.usrp_gain ?? 40.0;
+  document.getElementById("cfg-usrp-serial").value   = cfg.receiver?.usrp_serial ?? "";
+  document.getElementById("cfg-usrp-gain").value     = usrpGain;
+  document.getElementById("cfg-usrp-gain-lbl").textContent = parseFloat(usrpGain).toFixed(1);
+  document.getElementById("cfg-usrp-antenna").value  = cfg.receiver?.usrp_antenna ?? "RX2";
+  document.getElementById("cfg-usrp-ppm").value      = cfg.receiver?.usrp_ppm ?? 0;
+  document.getElementById("cfg-ttl").value = cfg.aircraft_ttl || 60;
+  document.getElementById("cfg-history-ttl").value = cfg.history_ttl || 86400;
+
+  document.getElementById("cfg-tak-enabled").checked = cfg.tak?.enabled || false;
+  document.getElementById("cfg-tak-protocol").value = cfg.tak?.protocol || "udp";
+  document.getElementById("cfg-tak-host").value = cfg.tak?.host || "239.2.3.1";
+  document.getElementById("cfg-tak-port").value = cfg.tak?.port || 6969;
+  document.getElementById("cfg-tak-interval").value = cfg.tak?.interval || 5;
+
+  document.getElementById("cfg-auto-view").checked = cfg.web?.auto_view || false;
+  const za = cfg.web?.zoom_adjust ?? 0;
+  document.getElementById("cfg-zoom-adjust").value = za;
+  document.getElementById("cfg-zoom-adjust-val").textContent = za;
+  document.getElementById("cfg-zoom-adjust-row").style.display = cfg.web?.auto_view ? "" : "none";
+
+  document.getElementById("cfg-sbs-server-enabled").checked = cfg.servers?.sbs_enabled || false;
+  document.getElementById("cfg-sbs-server-port").value      = cfg.servers?.sbs_port || 30003;
+  document.getElementById("cfg-avr-server-enabled").checked = cfg.servers?.avr_enabled || false;
+  document.getElementById("cfg-avr-server-port").value      = cfg.servers?.avr_port || 30002;
+  document.getElementById("cfg-update-host").value = cfg.update?.host || "";
+  document.getElementById("cfg-update-port").value = cfg.update?.port || 8080;
+
+  updateReceiverFields();
+  updateTileSelection(cfg.web?.map_type || "osm");
+  updateIconSelection(cfg.web?.icon_type || "arrow");
+
+  const locMode = cfg.location?.mode || "none";
+  document.getElementById("cfg-location-mode").value = locMode;
+  document.getElementById("cfg-location-lat").value  = cfg.location?.lat || "";
+  document.getElementById("cfg-location-lon").value  = cfg.location?.lon || "";
+  document.getElementById("cfg-gpsd-host").value     = cfg.location?.gpsd_host || "127.0.0.1";
+  document.getElementById("cfg-gpsd-port").value     = cfg.location?.gpsd_port || 2947;
+  updateLocationFields();
+}
+
+// ── Gain preview state ────────────────────────────────────────────────────
+let gainPreviewTimer  = null;
+let gainPreviewActive = false;
+let gainSaving        = false;
+let gainOriginal      = { agc: false, gain: 49.6 };
+
+function hideGainPreviewBar() {
+  const bar = document.getElementById("gain-preview-bar");
+  if (bar) bar.style.display = "none";
+}
+
+function showGainPreviewBar(agc, gain) {
+  const bar   = document.getElementById("gain-preview-bar");
+  const label = document.getElementById("gain-preview-label");
+  if (!bar) return;
+  label.textContent = agc ? "(AGC)" : `(${parseFloat(gain).toFixed(1)} dB)`;
+  bar.style.display = "flex";
+}
+
+function scheduleGainPreview() {
+  if (document.getElementById("cfg-receiver-type").value !== "rtlsdr") return;
+  clearTimeout(gainPreviewTimer);
+  gainPreviewTimer = setTimeout(() => {
+    const agc  = document.getElementById("cfg-rtlsdr-agc").checked;
+    const gain = parseFloat(document.getElementById("cfg-rtlsdr-gain").value);
+    fetch("/api/rtlsdr/gain/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agc, gain }),
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        gainPreviewActive = true;
+        showGainPreviewBar(agc, gain);
+      } else {
+        showToast("Gain preview unavailable: " + (d.error || "SDR not active"), "warning");
+      }
+    })
+    .catch(() => showToast("Gain preview request failed", "warning"));
+  }, 1000);
+}
+
+function cancelGainPreview() {
+  clearTimeout(gainPreviewTimer);
+  if (!gainPreviewActive) return;
+  gainPreviewActive = false;
+  hideGainPreviewBar();
+  // Restore form to the values that were in place when the modal opened
+  document.getElementById("cfg-rtlsdr-agc").checked = gainOriginal.agc;
+  document.getElementById("cfg-rtlsdr-gain").value  = gainOriginal.gain;
+  updateAgcToggle();
+  // Tell the server to restore the saved config values on the live device
+  fetch("/api/rtlsdr/gain/revert", { method: "POST" }).catch(() => {});
+}
+
+// ── HackRF gain preview ───────────────────────────────────────────────────
+let hackrfGainPreviewActive = false;
+let hackrfGainPreviewTimer  = null;
+let hackrfGainOriginal = { lna: 16, vga: 20, amp: false };
+
+function hideHackrfGainPreviewBar() {
+  const bar = document.getElementById("hackrf-gain-preview-bar");
+  if (bar) bar.style.display = "none";
+}
+
+function showHackrfGainPreviewBar(lna, vga, amp) {
+  const bar   = document.getElementById("hackrf-gain-preview-bar");
+  const label = document.getElementById("hackrf-gain-preview-label");
+  if (!bar) return;
+  label.textContent = `LNA ${lna} dB  VGA ${vga} dB${amp ? "  +Amp" : ""}`;
+  bar.style.display = "flex";
+}
+
+function scheduleHackrfGainPreview() {
+  if (document.getElementById("cfg-receiver-type").value !== "hackrf") return;
+  clearTimeout(hackrfGainPreviewTimer);
+  hackrfGainPreviewTimer = setTimeout(() => {
+    const lna = parseInt(document.getElementById("cfg-hackrf-lna").value);
+    const vga = parseInt(document.getElementById("cfg-hackrf-vga").value);
+    const amp = document.getElementById("cfg-hackrf-amp").checked;
+    fetch("/api/hackrf/gain/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lna_gain: lna, vga_gain: vga, amp }),
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        hackrfGainPreviewActive = true;
+        showHackrfGainPreviewBar(lna, vga, amp);
+      } else {
+        showToast("HackRF gain preview unavailable: " + (d.error || "device not active"), "warning");
+      }
+    })
+    .catch(() => showToast("HackRF gain preview request failed", "warning"));
+  }, 1000);
+}
+
+function cancelHackrfGainPreview() {
+  clearTimeout(hackrfGainPreviewTimer);
+  if (!hackrfGainPreviewActive) return;
+  hackrfGainPreviewActive = false;
+  hideHackrfGainPreviewBar();
+  document.getElementById("cfg-hackrf-lna").value   = hackrfGainOriginal.lna;
+  document.getElementById("cfg-hackrf-vga").value   = hackrfGainOriginal.vga;
+  document.getElementById("cfg-hackrf-amp").checked = hackrfGainOriginal.amp;
+  fetch("/api/hackrf/gain/revert", { method: "POST" }).catch(() => {});
+}
+
+// ── USRP gain preview ─────────────────────────────────────────────────────
+let usrpGainPreviewActive = false;
+let usrpGainPreviewTimer  = null;
+let usrpGainOriginal = 40.0;
+
+function hideUsrpGainPreviewBar() {
+  const bar = document.getElementById("usrp-gain-preview-bar");
+  if (bar) bar.style.display = "none";
+}
+
+function showUsrpGainPreviewBar(gain) {
+  const bar   = document.getElementById("usrp-gain-preview-bar");
+  const label = document.getElementById("usrp-gain-preview-label");
+  if (!bar) return;
+  label.textContent = `${parseFloat(gain).toFixed(1)} dB`;
+  bar.style.display = "flex";
+}
+
+function scheduleUsrpGainPreview() {
+  if (document.getElementById("cfg-receiver-type").value !== "usrp") return;
+  clearTimeout(usrpGainPreviewTimer);
+  usrpGainPreviewTimer = setTimeout(() => {
+    const gain = parseFloat(document.getElementById("cfg-usrp-gain").value);
+    document.getElementById("cfg-usrp-gain-lbl").textContent = gain.toFixed(1);
+    fetch("/api/usrp/gain/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gain }),
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        usrpGainPreviewActive = true;
+        showUsrpGainPreviewBar(gain);
+      } else {
+        showToast("USRP gain preview unavailable: " + (d.error || "device not active"), "warning");
+      }
+    })
+    .catch(() => {});
+  }, 300);
+}
+
+function cancelUsrpGainPreview() {
+  clearTimeout(usrpGainPreviewTimer);
+  if (!usrpGainPreviewActive) return;
+  usrpGainPreviewActive = false;
+  hideUsrpGainPreviewBar();
+  document.getElementById("cfg-usrp-gain").value = usrpGainOriginal;
+  document.getElementById("cfg-usrp-gain-lbl").textContent = parseFloat(usrpGainOriginal).toFixed(1);
+  fetch("/api/usrp/gain/revert", { method: "POST" }).catch(() => {});
+}
+
+function updateReceiverFields() {
+  const type = document.getElementById("cfg-receiver-type").value;
+  const hasHost = type === "sbs" || type === "avr" || type === "json";
+  const hasSdr = type === "rtlsdr" || type === "avr_subprocess";
+  const hasHackrf = type === "hackrf";
+  const hasUsrp = type === "usrp";
+  document.getElementById("row-receiver-host").style.display = hasHost ? "" : "none";
+  document.getElementById("row-sbs-port").style.display      = type === "sbs"  ? "" : "none";
+  document.getElementById("row-avr-port").style.display      = type === "avr"  ? "" : "none";
+  document.getElementById("row-json-port").style.display     = type === "json" ? "" : "none";
+  const sdrWasHidden = document.getElementById("row-rtlsdr").style.display === "none";
+  document.getElementById("row-rtlsdr").style.display        = hasSdr ? "" : "none";
+  document.getElementById("row-hackrf").style.display        = hasHackrf ? "" : "none";
+  document.getElementById("row-usrp").style.display          = hasUsrp ? "" : "none";
+  document.getElementById("row-spectrum-tab").style.display  = (type === "rtlsdr" || type === "hackrf" || type === "usrp") ? "" : "none";
+  document.getElementById("row-json-status").style.display   = type === "json" ? "" : "none";
+  if (hasSdr && sdrWasHidden) refreshRtlsdrDevices();
+  updateAgcToggle();
+}
+
+function refreshRtlsdrDevices() {
+  const sel   = document.getElementById("cfg-rtlsdr-device");
+  const hint  = document.getElementById("rtlsdr-device-hint");
+  const pending = parseInt(sel.dataset.pending ?? sel.value ?? 0);
+  hint.textContent = "Scanning…";
+  fetch("/api/rtlsdr/devices")
+    .then(r => r.json())
+    .then(data => {
+      if (!Array.isArray(data) || data.length === 0) {
+        hint.textContent = "No devices found — plug in RTL-SDR and refresh";
+        sel.innerHTML = '<option value="0">Device 0</option>';
+        return;
+      }
+      sel.innerHTML = data.map(d =>
+        `<option value="${d.index}">${d.index}: ${d.name}</option>`
+      ).join("");
+      // Restore saved device index if still present
+      if ([...sel.options].some(o => parseInt(o.value) === pending)) {
+        sel.value = pending;
+      }
+      hint.textContent = `${data.length} device${data.length !== 1 ? "s" : ""} found`;
+    })
+    .catch(() => { hint.textContent = "Enumeration unavailable (pyrtlsdr not installed?)"; });
+}
+
+function updateAgcToggle() {
+  const agc = document.getElementById("cfg-rtlsdr-agc").checked;
+  const gainInput = document.getElementById("cfg-rtlsdr-gain");
+  gainInput.disabled = agc;
+  gainInput.style.opacity = agc ? "0.4" : "";
+}
+
+document.getElementById("cfg-receiver-type").addEventListener("change", () => {
+  updateReceiverFields();
+  cancelGainPreview();        // cancel RTL-SDR preview when switching away
+  cancelHackrfGainPreview();  // cancel HackRF preview when switching away
+  cancelUsrpGainPreview();    // cancel USRP preview when switching away
+});
+document.getElementById("cfg-rtlsdr-agc").addEventListener("change", () => {
+  updateAgcToggle();
+  scheduleGainPreview();
+});
+document.getElementById("cfg-rtlsdr-gain").addEventListener("input", scheduleGainPreview);
+document.getElementById("rtlsdr-refresh-btn").addEventListener("click", refreshRtlsdrDevices);
+document.getElementById("cfg-hackrf-lna").addEventListener("change", scheduleHackrfGainPreview);
+document.getElementById("cfg-hackrf-vga").addEventListener("input", scheduleHackrfGainPreview);
+document.getElementById("cfg-hackrf-amp").addEventListener("change", scheduleHackrfGainPreview);
+document.getElementById("cfg-usrp-gain").addEventListener("input", scheduleUsrpGainPreview);
+document.getElementById("spectrum-peak-reset").addEventListener("click", () => {
+  spectrumPeak = spectrumData ? [...spectrumData] : null;
+  drawSpectrum();
+});
+
+// Redraw tab canvas whenever Receiver tab becomes visible
+document.querySelector('a[href="#tab-receiver"]').addEventListener("shown.bs.tab", () => {
+  if (spectrumData) drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+});
+
+document.getElementById("settings-modal").addEventListener("show.bs.modal", () => {
+  gainSaving = false;
+  gainPreviewActive = false;
+  clearTimeout(gainPreviewTimer);
+  hideGainPreviewBar();
+  fetch("/api/config")
+    .then(r => r.json())
+    .then(cfg => {
+      loadSettingsForm(cfg);
+      // Snapshot the gain values at the moment the modal opens so we can
+      // restore them if the user cancels after previewing a different gain.
+      gainOriginal = {
+        agc:  cfg.receiver?.rtlsdr_agc  ?? false,
+        gain: cfg.receiver?.rtlsdr_gain ?? 49.6,
+      };
+      hackrfGainOriginal = {
+        lna: cfg.receiver?.hackrf_lna_gain ?? 16,
+        vga: cfg.receiver?.hackrf_vga_gain ?? 20,
+        amp: cfg.receiver?.hackrf_amp ?? false,
+      };
+      usrpGainOriginal = cfg.receiver?.usrp_gain ?? 40.0;
+    });
+  socket.emit("spectrum_subscribe", true);
+  refreshDbStats();
+});
+
+function fmtBytes(b) {
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+  return (b / 1048576).toFixed(1) + " MB";
+}
+function refreshDbStats() {
+  fetch("/api/store/stats").then(r => r.json()).then(s => {
+    document.getElementById("db-stats-info").textContent =
+      `${s.row_count.toLocaleString()} positions \u00b7 ${fmtBytes(s.size_bytes)}`;
+  }).catch(() => {
+    document.getElementById("db-stats-info").textContent = "unavailable";
+  });
+}
+document.getElementById("btn-db-reset").addEventListener("click", () => {
+  if (!confirm("Delete ALL position history? This cannot be undone.")) return;
+  fetch("/api/store/reset", { method: "POST" })
+    .then(r => r.json())
+    .then(d => {
+      refreshDbStats();
+      alert(`Cleared ${d.cleared.toLocaleString()} records.`);
+    })
+    .catch(e => alert("Reset failed: " + e));
+});
+
+document.getElementById("settings-modal").addEventListener("hide.bs.modal", () => {
+  socket.emit("spectrum_subscribe", false);
+  if (gainSaving) {
+    // Save was confirmed — preview values become the new saved values.
+    gainPreviewActive = false;
+    hideGainPreviewBar();
+  } else {
+    // Modal was dismissed (×, Escape, outside click) — revert live device.
+    cancelGainPreview();
+    cancelHackrfGainPreview();
+    cancelUsrpGainPreview();
+  }
+  gainSaving = false;
+  clearTimeout(gainPreviewTimer);
+});
+
+document.getElementById("settings-modal").addEventListener("shown.bs.modal", () => {
+  // Defer so loadSettingsForm()/updateReceiverFields() has run first and the
+  // spectrum row is visible before we measure canvas dimensions.
+  setTimeout(() => {
+    if (spectrumData) drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+  }, 50);
+});
+
+// Also redraw when the Receiver tab is clicked — the tab switch makes the
+// canvas visible for the first time and it needs an explicit draw.
+document.querySelector('a[href="#tab-receiver"]')?.addEventListener("shown.bs.tab", () => {
+  if (spectrumData) drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+});
+
+document.getElementById("save-settings-btn").addEventListener("click", () => {
+  gainSaving = true;
+  clearTimeout(gainPreviewTimer);
+  const payload = {
+    receiver: {
+      type:                  document.getElementById("cfg-receiver-type").value,
+      host:                  document.getElementById("cfg-receiver-host").value,
+      sbs_port:              parseInt(document.getElementById("cfg-sbs-port").value),
+      avr_port:              parseInt(document.getElementById("cfg-avr-port").value),
+      json_port:             parseInt(document.getElementById("cfg-json-port").value),
+      rtlsdr_device_index:   parseInt(document.getElementById("cfg-rtlsdr-device").value),
+      rtlsdr_agc:            document.getElementById("cfg-rtlsdr-agc").checked,
+      rtlsdr_gain:           parseFloat(document.getElementById("cfg-rtlsdr-gain").value),
+      rtlsdr_ppm:            parseInt(document.getElementById("cfg-rtlsdr-ppm").value),
+      hackrf_device_index:   parseInt(document.getElementById("cfg-hackrf-device").value),
+      hackrf_lna_gain:       parseInt(document.getElementById("cfg-hackrf-lna").value),
+      hackrf_vga_gain:       parseInt(document.getElementById("cfg-hackrf-vga").value),
+      hackrf_ppm:            parseInt(document.getElementById("cfg-hackrf-ppm").value),
+      hackrf_amp:            document.getElementById("cfg-hackrf-amp").checked,
+      usrp_serial:           document.getElementById("cfg-usrp-serial").value.trim(),
+      usrp_gain:             parseFloat(document.getElementById("cfg-usrp-gain").value),
+      usrp_antenna:          document.getElementById("cfg-usrp-antenna").value,
+      usrp_ppm:              parseInt(document.getElementById("cfg-usrp-ppm").value),
+    },
+    tak: {
+      enabled:  document.getElementById("cfg-tak-enabled").checked,
+      protocol: document.getElementById("cfg-tak-protocol").value,
+      host:     document.getElementById("cfg-tak-host").value,
+      port:     parseInt(document.getElementById("cfg-tak-port").value),
+      interval: parseFloat(document.getElementById("cfg-tak-interval").value),
+    },
+    web: {
+      map_type: document.querySelector(".tile-option.border-primary")?.dataset.tile ||
+                appConfig.web?.map_type || "osm",
+      auto_view: document.getElementById("cfg-auto-view").checked,
+      zoom_adjust: parseInt(document.getElementById("cfg-zoom-adjust").value),
+      icon_type: document.querySelector(".icon-option.border-primary")?.dataset.icon ||
+                 appConfig.web?.icon_type || "arrow",
+    },
+    servers: {
+      sbs_enabled: document.getElementById("cfg-sbs-server-enabled").checked,
+      sbs_port:    parseInt(document.getElementById("cfg-sbs-server-port").value),
+      avr_enabled: document.getElementById("cfg-avr-server-enabled").checked,
+      avr_port:    parseInt(document.getElementById("cfg-avr-server-port").value),
+    },
+    update: {
+      host: document.getElementById("cfg-update-host").value.trim(),
+      port: parseInt(document.getElementById("cfg-update-port").value) || 8080,
+    },
+    location: {
+      mode:      document.getElementById("cfg-location-mode").value,
+      lat:       parseFloat(document.getElementById("cfg-location-lat").value) || 0,
+      lon:       parseFloat(document.getElementById("cfg-location-lon").value) || 0,
+      gpsd_host: document.getElementById("cfg-gpsd-host").value,
+      gpsd_port: parseInt(document.getElementById("cfg-gpsd-port").value) || 2947,
+    },
+    aircraft_ttl: parseInt(document.getElementById("cfg-ttl").value),
+    history_ttl:  parseInt(document.getElementById("cfg-history-ttl").value),
+  };
+
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      bootstrap.Modal.getInstance(document.getElementById("settings-modal")).hide();
+      setTileLayer(payload.web.map_type);
+      autoView = payload.web.auto_view;
+      zoomAdjust = payload.web.zoom_adjust ?? 0;
+      if (autoView) applyAutoView();
+      iconType = payload.web.icon_type;
+      refreshAllMarkers();
+      aircraftTTL = payload.aircraft_ttl;
+      showToast("Settings saved", "success");
+    } else {
+      gainSaving = false;
+      showToast("Error: " + d.error, "danger");
+    }
+  })
+  .catch(() => { gainSaving = false; });
+});
+
+// ============================================================
+// MAP TILE SELECTOR
+// ============================================================
+function updateTileSelection(tile) {
+  document.querySelectorAll(".tile-option").forEach(el => {
+    el.classList.toggle("border-primary", el.dataset.tile === tile);
+    el.classList.toggle("border-secondary", el.dataset.tile !== tile);
+  });
+}
+
+document.querySelectorAll(".tile-option").forEach(el => {
+  el.classList.add("border-secondary");
+  el.addEventListener("click", () => {
+    updateTileSelection(el.dataset.tile);
+    setTileLayer(el.dataset.tile);
+  });
+});
+
+function updateIconSelection(type) {
+  document.querySelectorAll(".icon-option").forEach(el => {
+    el.classList.toggle("border-primary", el.dataset.icon === type);
+    el.classList.toggle("border-secondary", el.dataset.icon !== type);
+  });
+}
+
+document.querySelectorAll(".icon-option").forEach(el => {
+  el.classList.add("border-secondary");
+  el.addEventListener("click", () => updateIconSelection(el.dataset.icon));
+});
+
+// Render milsymbol preview tile once the library is available
+(function tryMilsymbolPreview() {
+  if (window.ms) {
+    const prev = document.getElementById("milsymbol-preview");
+    if (prev) {
+      const sym = new ms.Symbol("SFAPMFQ--------", { size: 22 });
+      prev.innerHTML = sym.asSVG();
+    }
+  } else {
+    setTimeout(tryMilsymbolPreview, 200);
+  }
+})();
+
+// ============================================================
+// TABLE SORTING
+// ============================================================
+document.querySelectorAll("#aircraft-table thead th[data-col]").forEach(th => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      sortAsc = !sortAsc;
+    } else {
+      sortCol = col;
+      sortAsc = true;
+    }
+    document.querySelectorAll("#aircraft-table thead th").forEach(h => {
+      h.classList.remove("sort-asc", "sort-desc");
+    });
+    th.classList.add(sortAsc ? "sort-asc" : "sort-desc");
+    renderTable();
+  });
+});
+
+document.getElementById("filter-input").addEventListener("input", e => {
+  filterText = e.target.value;
+  renderTable();
+});
+
+// ============================================================
+// TOAST
+// ============================================================
+function showToast(msg, type = "info") {
+  const el = document.createElement("div");
+  el.className = `toast align-items-center text-bg-${type} border-0 position-fixed bottom-0 end-0 m-3`;
+  el.style.zIndex = 9999;
+  el.setAttribute("role", "alert");
+  el.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${msg}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>`;
+  document.body.appendChild(el);
+  const t = new bootstrap.Toast(el, { delay: 3000 });
+  t.show();
+  el.addEventListener("hidden.bs.toast", () => el.remove());
+}
+
+// ============================================================
+// GEOLOCATION — center map on user's location
+// ============================================================
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(pos => {
+    map.setView([pos.coords.latitude, pos.coords.longitude], 8);
+  }, () => {});
+}
+
+// ============================================================
+// MOBILE UI
+// ============================================================
+function isMobile() {
+  return (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) &&
+         window.innerWidth < 900;
+}
+
+if (isMobile()) {
+  document.body.classList.add('mobile-ui');
+
+  // Make settings modal full-screen on mobile
+  document.querySelector('#settings-modal .modal-dialog')
+    .classList.add('modal-fullscreen');
+
+  const sidebar  = document.getElementById('sidebar');
+  const handle   = document.getElementById('drawer-handle');
+  const header   = document.getElementById('sidebar-header');
+  let drawerOpen = false;
+
+  // Transition duration matches CSS (280ms); invalidate after it finishes
+  const DRAWER_MS = 300;
+
+  function setDrawer(open, animate) {
+    if (animate === false) sidebar.style.transition = 'none';
+    drawerOpen = open;
+    sidebar.classList.toggle('drawer-open', open);
+    if (animate === false) {
+      requestAnimationFrame(() => {
+        sidebar.style.transition = '';
+        map.invalidateSize();
+      });
+    } else {
+      setTimeout(() => map.invalidateSize(), DRAWER_MS);
+    }
+  }
+
+  // Invalidate once on load so tiles fill the map behind the collapsed drawer
+  setTimeout(() => map.invalidateSize(), 100);
+
+  // Tap pill or header to toggle
+  handle.addEventListener('click', () => setDrawer(!drawerOpen));
+  header.addEventListener('click', () => setDrawer(!drawerOpen));
+
+  // Drag-to-open/close on handle
+  let touchStartY = 0, touchStartTranslateY = 0, isDragging = false;
+
+  function getCurrentTranslateY() {
+    const m = new DOMMatrix(getComputedStyle(sidebar).transform);
+    return m.m42;
+  }
+
+  function collapsedY() { return sidebar.offsetHeight - 48; }
+
+  handle.addEventListener('touchstart', e => {
+    touchStartY = e.touches[0].clientY;
+    touchStartTranslateY = getCurrentTranslateY();
+    isDragging = true;
+    sidebar.style.transition = 'none';
+  }, { passive: true });
+
+  handle.addEventListener('touchmove', e => {
+    if (!isDragging) return;
+    const dy = e.touches[0].clientY - touchStartY;
+    const newY = Math.max(0, Math.min(collapsedY(), touchStartTranslateY + dy));
+    sidebar.style.transform = `translateY(${newY}px)`;
+  }, { passive: true });
+
+  handle.addEventListener('touchend', e => {
+    if (!isDragging) return;
+    isDragging = false;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    sidebar.style.transform = '';
+    sidebar.style.transition = '';
+    if (Math.abs(dy) < 10) {
+      setDrawer(!drawerOpen); // treat as tap
+    } else if (dy > 0) {
+      setDrawer(false);       // dragged down → close
+    } else {
+      setDrawer(true);        // dragged up → open
+    }
+    setTimeout(() => map.invalidateSize(), DRAWER_MS);
+  }, { passive: true });
+
+  // Auto-open drawer when aircraft is selected
+  const _origSelect = selectAircraft;
+  selectAircraft = function(icao) {
+    _origSelect(icao);
+    setDrawer(true);
+  };
+}
+
+// ============================================================
+// SENSOR LOCATION (house marker)
+// ============================================================
+let sensorMarker = null;
+
+const houseIcon = L.divIcon({
+  className: "",
+  html: '<i class="bi bi-house-fill" style="font-size:1.4rem;color:#4e8fd6;text-shadow:0 0 4px #000;"></i>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 20],
+  popupAnchor: [0, -22],
+});
+
+function updateSensorMarker(lat, lon) {
+  if (lat == null || lon == null) {
+    if (sensorMarker) { map.removeLayer(sensorMarker); sensorMarker = null; }
+    return;
+  }
+  const popupContent = `<div class="ac-popup"><div style="font-weight:700;font-size:0.9rem;margin-bottom:4px;">Sensor Location</div><div><span class="ac-pop-lbl">Latitude</span> ${lat.toFixed(6)}</div><div><span class="ac-pop-lbl">Longitude</span> ${lon.toFixed(6)}</div></div>`;
+  if (sensorMarker) {
+    sensorMarker.setLatLng([lat, lon]);
+    sensorMarker.setPopupContent(popupContent);
+  } else {
+    sensorMarker = L.marker([lat, lon], { icon: houseIcon, zIndexOffset: 1000 })
+      .bindPopup(popupContent, { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
+    if (!document.body.classList.contains("history-active")) sensorMarker.addTo(map);
+    sensorMarker.on("mouseover", function () { this.openPopup(); });
+    sensorMarker.on("mouseout",  function () { this.closePopup(); });
+  }
+}
+
+function pollSensorLocation() {
+  fetch("/api/location")
+    .then(r => r.json())
+    .then(d => {
+      updateSensorMarker(d.lat, d.lon);
+      // Update gpsd status text if the tab is open
+      const fixEl = document.getElementById("gpsd-fix-text");
+      if (fixEl && d.mode === "gpsd") {
+        fixEl.textContent = d.lat != null
+          ? `Fix: ${d.lat.toFixed(6)}, ${d.lon.toFixed(6)}`
+          : "No fix yet";
+      }
+    })
+    .catch(() => {});
+}
+
+pollSensorLocation();
+setInterval(pollSensorLocation, 5000);
+
+function updateLocationFields() {
+  const mode = document.getElementById("cfg-location-mode").value;
+  document.getElementById("row-location-manual").style.display = mode === "manual" ? "" : "none";
+  document.getElementById("row-location-gpsd").style.display   = mode === "gpsd"   ? "" : "none";
+}
+
+document.getElementById("cfg-location-mode").addEventListener("change", updateLocationFields);
+
+function probeGpsd() {
+  const host = document.getElementById("cfg-gpsd-host").value || "127.0.0.1";
+  const port = document.getElementById("cfg-gpsd-port").value || 2947;
+  const opt  = document.querySelector('#cfg-location-mode option[value="gpsd"]');
+  const fixEl = document.getElementById("gpsd-fix-text");
+  if (!opt) return;
+  fetch(`/api/gpsd/probe?host=${encodeURIComponent(host)}&port=${port}`)
+    .then(r => r.json())
+    .then(d => {
+      if (d.available) {
+        opt.disabled = false;
+        opt.textContent = "GPSd — use GPS daemon";
+        if (fixEl) fixEl.style.color = "";
+      } else {
+        opt.disabled = true;
+        opt.textContent = "GPSd — use GPS daemon (not reachable)";
+        // If currently selected, fall back to none
+        if (document.getElementById("cfg-location-mode").value === "gpsd") {
+          document.getElementById("cfg-location-mode").value = "none";
+          updateLocationFields();
+        }
+        if (fixEl) { fixEl.textContent = "gpsd not reachable"; fixEl.style.color = "#cc4444"; }
+      }
+    })
+    .catch(() => {});
+}
+
+// Re-probe when host or port changes
+document.getElementById("cfg-gpsd-host").addEventListener("change", probeGpsd);
+document.getElementById("cfg-gpsd-port").addEventListener("change", probeGpsd);
+
+// Refresh gpsd fix status and re-probe when Location tab is shown
+document.querySelector('a[href="#tab-location"]')
+  ?.addEventListener("shown.bs.tab", () => {
+    probeGpsd();
+    if (document.getElementById("cfg-location-mode").value === "gpsd") pollSensorLocation();
+  });
+
+// ============================================================
+// TILE CACHE (server-side disk cache)
+// ============================================================
+(function () {
+  const sizeEl   = document.getElementById("tile-cache-size");
+  const clearBtn = document.getElementById("btn-clear-tile-cache");
+  const statusEl = document.getElementById("tile-cache-status");
+
+  function fmtBytes(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1048576).toFixed(1) + " MB";
+  }
+
+  function requestSize() {
+    fetch("/api/tiles/stats")
+      .then(r => r.json())
+      .then(d => {
+        sizeEl.textContent = d.tiles === 0
+          ? "Cache empty"
+          : fmtBytes(d.bytes) + " \u00b7 " + d.tiles.toLocaleString() + " tiles";
+        clearBtn.disabled = d.tiles === 0;
+      })
+      .catch(() => { sizeEl.textContent = "Unavailable"; });
+  }
+
+  clearBtn.addEventListener("click", () => {
+    clearBtn.disabled = true;
+    sizeEl.textContent = "Clearing\u2026";
+    fetch("/api/tiles/clear", { method: "POST" })
+      .then(r => r.json())
+      .then(() => {
+        sizeEl.textContent = "Cache empty";
+        statusEl.textContent = "Cleared";
+        statusEl.style.display = "";
+        setTimeout(() => { statusEl.style.display = "none"; }, 2500);
+      })
+      .catch(() => { sizeEl.textContent = "Error"; clearBtn.disabled = false; });
+  });
+
+  // Refresh size when Display tab or settings modal is opened
+  document.querySelector('a[data-bs-toggle="tab"][href="#tab-display"]')
+    ?.addEventListener("shown.bs.tab", requestSize);
+  document.getElementById("settings-modal")
+    ?.addEventListener("show.bs.modal", requestSize);
+})();
+
+// ============================================================
+// APP UPDATE
+// ============================================================
+let _updateFiles = [];
+let _updateApplied = false;  // guard: prevent stale fetch resolving after download
+
+function _applyUpdateState(state) {
+  if (_updateApplied) return;
+  const badge      = document.getElementById("update-badge");
+  const btnCheck   = document.getElementById("btn-update-check");
+  const btnPull    = document.getElementById("btn-update-pull");
+  const btnRestart = document.getElementById("btn-update-restart");
+  const statusText = document.getElementById("update-status-text");
+  if (!badge) return;
+
+  function _badgeTooltipClear() {
+    badge.dataset.tooltip = "";
+  }
+
+  if (state.checking) {
+    badge.className = "badge bg-secondary";
+    badge.textContent = "Checking\u2026";
+    _badgeTooltipClear();
+    if (statusText) statusText.textContent = "Checking for updates\u2026";
+    if (btnPull)    btnPull.style.display    = "none";
+    return;
+  }
+  if (state.error) {
+    badge.className = "badge bg-danger";
+    badge.textContent = "Error";
+    _badgeTooltipClear();
+    if (statusText) statusText.textContent = state.error;
+    return;
+  }
+  if (state.available) {
+    _updateFiles = (state.files || []).map(f => typeof f === "string" ? f : f.path);
+    badge.className = "badge bg-warning text-dark";
+    badge.textContent = `${_updateFiles.length} file${_updateFiles.length !== 1 ? "s" : ""} available`;
+    const ttHeader = `<div class="tt-header">${_updateFiles.length} file${_updateFiles.length !== 1 ? "s" : ""} to update</div>`;
+    const ttRows   = _updateFiles.map(p => `<div class="tt-row"><span class="tt-addr">${p}</span></div>`).join("");
+    badge.dataset.tooltip = ttHeader + ttRows;
+    if (statusText) statusText.textContent = `${_updateFiles.length} file(s) ready to update from JSON API server`;
+    if (btnPull)    btnPull.style.display    = "";
+    if (btnRestart) btnRestart.style.display = "none";
+  } else {
+    badge.className = "badge bg-success";
+    badge.textContent = "Up to date";
+    _badgeTooltipClear();
+    const t = state.last_check ? `Last checked ${new Date(state.last_check * 1000).toLocaleTimeString()}` : "No updates available";
+    if (statusText) statusText.textContent = t;
+    if (btnCheck)   btnCheck.style.display   = "";
+    if (btnPull)    btnPull.style.display    = "none";
+    if (btnRestart) btnRestart.style.display = "none";
+  }
+}
+
+function checkForUpdates() {
+  _updateApplied = false;
+  const badge      = document.getElementById("update-badge");
+  const statusText = document.getElementById("update-status-text");
+  const host = (document.getElementById("cfg-update-host")?.value || "").trim();
+  const port = parseInt(document.getElementById("cfg-update-port")?.value) || 8080;
+  if (!host) {
+    if (badge)      { badge.className = "badge bg-secondary"; badge.textContent = "—"; }
+    if (statusText) statusText.textContent = "Enter an update server host to check for updates.";
+    return;
+  }
+  if (badge)      { badge.className = "badge bg-secondary"; badge.textContent = "Checking\u2026"; }
+  const _btnPull = document.getElementById("btn-update-pull");
+  if (_btnPull)   _btnPull.style.display = "none";
+  if (statusText) statusText.textContent = "Checking for updates\u2026";
+  // Persist host/port first so the backend knows where to pull from
+  fetch("/api/config", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({update: {host, port}}),
+  })
+    .then(() => fetch("/api/update/check"))
+    .then(r => r.json())
+    .then(data => _applyUpdateState(data))
+    .catch(e => {
+      if (badge)      { badge.className = "badge bg-danger"; badge.textContent = "Error"; }
+      if (statusText) statusText.textContent = String(e);
+    });
+}
+
+function pullUpdate() {
+  const logEl     = document.getElementById("update-log");
+  const badge     = document.getElementById("update-badge");
+  const btnPull   = document.getElementById("btn-update-pull");
+  const btnCheck  = document.getElementById("btn-update-check");
+  const btnRestart= document.getElementById("btn-update-restart");
+  const statusText= document.getElementById("update-status-text");
+  if (!_updateFiles.length) return;
+
+  if (btnPull)  { btnPull.disabled  = true; }
+  if (btnCheck) { btnCheck.disabled = true; }
+  if (logEl)    { logEl.style.display = ""; logEl.innerHTML = ""; }
+
+  function logLine(text, cls) {
+    if (!logEl) return;
+    const line = document.createElement("div");
+    line.style.color = cls === "ok" ? "#6ef06e" : cls === "err" ? "#ff6b6b" : "#aabbcc";
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  if (badge)      { badge.className = "badge bg-warning text-dark"; badge.textContent = "Updating…"; }
+  if (statusText) statusText.textContent = `Updating ${_updateFiles.length} file(s)…`;
+  logLine(`Pulling ${_updateFiles.length} file(s) from JSON API server…`);
+
+  const files = [..._updateFiles];
+  let idx = 0, errors = 0;
+
+  function pullNext() {
+    if (idx >= files.length) {
+      if (errors === 0) {
+        _updateApplied = true;
+        logLine("Update complete — restart required to apply changes.", "ok");
+        if (badge)      { badge.className = "badge bg-success"; badge.textContent = "Updated"; badge.dataset.tooltip = ""; }
+        if (statusText) statusText.textContent = "Update complete. Click Restart Now to apply.";
+        if (btnCheck)   btnCheck.style.display   = "none";
+        if (btnPull)    btnPull.style.display     = "none";
+        if (btnRestart) btnRestart.style.display  = "";
+      } else {
+        if (btnCheck) { btnCheck.disabled = false; }
+        logLine(`Finished with ${errors} error(s).`, "err");
+        if (badge)    { badge.className = "badge bg-danger"; badge.textContent = `${errors} error(s)`; }
+        if (btnPull)  { btnPull.disabled = false; }
+      }
+      return;
+    }
+    const path = files[idx++];
+    logLine(`  → ${path}`);
+    fetch("/api/update/pull", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({files: [path]}),
+    })
+      .then(r => r.json())
+      .then(res => {
+        const r = res.results && res.results[0];
+        if (r && r.ok) {
+          logLine(`    ✓ done`, "ok");
+        } else {
+          logLine(`    ✗ ${r?.error || "failed"}`, "err");
+          errors++;
+        }
+        pullNext();
+      })
+      .catch(e => {
+        logLine(`    ✗ ${e}`, "err");
+        errors++;
+        pullNext();
+      });
+  }
+  pullNext();
+}
+
+function restartApp() {
+  const btnRestart = document.getElementById("btn-update-restart");
+  if (btnRestart) { btnRestart.disabled = true; btnRestart.textContent = "Restarting…"; }
+  fetch("/api/restart", {method: "POST"})
+    .finally(() => { setTimeout(() => window.location.reload(), 3000); });
+}
+
+// ============================================================
+// HISTORY MODE — playback & heatmap
+// ============================================================
+(function () {
+  // ── State ────────────────────────────────────────────────
+  let histActive   = false;
+  let histData     = {};    // { ICAO: [{ts,lat,lon,altitude,ground_speed,track,callsign,on_ground}] }
+  let histStart    = 0;
+  let histEnd      = 0;
+  let histCur      = 0;
+  let histPlaying  = false;
+  let histTimer    = null;
+  let heatLayer    = null;
+  let histLayerGrp = null;  // L.layerGroup for all playback markers/trails
+  let histMarkers  = {};    // ICAO → L.marker
+  let histTrails   = {};    // ICAO → L.polyline
+  let histCurMode  = "heatmap"; // "playback" | "heatmap"
+
+  const TRAIL_SEC  = 300;   // how many seconds of history to show per aircraft
+  const STALE_SEC  = 120;   // hide aircraft seen more than this many seconds ago
+
+  // ── Helpers ──────────────────────────────────────────────
+  function fmtTs(ts) {
+    if (!ts) return "—";
+    const d = new Date(ts * 1000);
+    return d.toLocaleString([], {month:"2-digit",day:"2-digit",
+      hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  }
+
+  function toLocalDatetimeValue(ts) {
+    const d = new Date(ts * 1000);
+    // datetime-local expects "YYYY-MM-DDTHH:MM"
+    const pad = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function fromLocalDatetimeValue(val) {
+    return val ? new Date(val).getTime() / 1000 : 0;
+  }
+
+  function setStatus(msg, ok) {
+    const el = document.getElementById("hist-status");
+    if (el) { el.textContent = msg; el.style.color = ok === false ? "#dc3545" : "#8899aa"; }
+  }
+
+  // ── Enter / exit ─────────────────────────────────────────
+  function enterHistory() {
+    histActive = true;
+    document.body.classList.add("history-active");
+    document.getElementById("btn-history-mode").classList.add("active","btn-info");
+    document.getElementById("btn-history-mode").classList.remove("btn-outline-secondary");
+    // Hide live aircraft markers and sensor marker
+    for (const m of Object.values(markers)) map.removeLayer(m);
+    if (sensorMarker) map.removeLayer(sensorMarker);
+    // Deselect any aircraft
+    if (selectedIcao) { selectedIcao = null; renderDetail(null); clearTrack(); }
+    // Initialise datetime pickers to "last 24 h"
+    const now = Date.now() / 1000;
+    const startTs = now - 86400;
+    document.getElementById("hist-end").value   = toLocalDatetimeValue(now);
+    document.getElementById("hist-start").value = toLocalDatetimeValue(startTs);
+    histStart = startTs; histEnd = now;
+    // Default to heatmap mode
+    histCurMode = "heatmap";
+    document.getElementById("hist-mode-heatmap").classList.add("active");
+    document.getElementById("hist-mode-playback").classList.remove("active");
+    document.getElementById("hist-player").style.display = "none";
+    // Layer group for history markers
+    if (!histLayerGrp) {
+      histLayerGrp = L.layerGroup().addTo(map);
+    }
+    // Pause live aircraft updates from reaching the map while in history mode
+    // (they still update in the background; we just don't re-render)
+    document.getElementById("hist-ac-badge").classList.remove("d-none");
+    const badge = document.getElementById("nav-receiver-badge");
+    badge.textContent = "← LIVE";
+    badge.className   = "badge bg-warning text-dark";
+    badge.style.cursor = "pointer";
+    badge.title = "Back to live";
+    // Let the browser reflow (sidebar hidden, map expanded) before telling
+    // Leaflet to recalculate its size and request the newly-visible tiles.
+    setTimeout(() => { map.invalidateSize(); loadHeatmap(); }, 50);
+  }
+
+  function exitHistory() {
+    stopPlay();
+    clearHeat();
+    clearPlaybackLayer();
+    histActive = false;
+    histData   = {};
+    document.body.classList.remove("history-active");
+    document.getElementById("btn-history-mode").classList.remove("active","btn-info");
+    document.getElementById("btn-history-mode").classList.add("btn-outline-secondary");
+    document.getElementById("hist-ac-badge").classList.add("d-none");
+    setStatus("");
+    // Restore live aircraft markers and sensor marker
+    for (const [icao, m] of Object.entries(markers)) {
+      if (aircraft[icao]) m.addTo(map);
+    }
+    if (sensorMarker) sensorMarker.addTo(map);
+    const badge = document.getElementById("nav-receiver-badge");
+    badge.style.cursor = "";
+    badge.title = "";
+    // Restore live/offline state from socket
+    if (socket && socket.connected) {
+      badge.className = "badge bg-success"; badge.textContent = "LIVE";
+    } else {
+      badge.className = "badge bg-danger"; badge.textContent = "OFFLINE";
+    }
+    setTimeout(() => map.invalidateSize(), 50);
+  }
+
+  // ── Heatmap ──────────────────────────────────────────────
+  function clearHeat() {
+    if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+  }
+
+  function loadHeatmap() {
+    clearHeat();
+    clearPlaybackLayer();
+    setStatus("Loading heatmap…");
+    fetch(`/api/heatmap?start=${histStart}&end=${histEnd}`)
+      .then(r => r.json())
+      .then(pts => {
+        if (!pts.length) { setStatus("No data in range", false); return; }
+        heatLayer = L.heatLayer(pts, {
+          radius: 25, blur: 18, maxZoom: 10, minOpacity: 0.3,
+          gradient: {0.2:"#00f", 0.5:"#0f0", 0.75:"#ff0", 1:"#f00"},
+        }).addTo(map);
+        // Fit map to heatmap bounds
+        const lats = pts.map(p => p[0]);
+        const lons = pts.map(p => p[1]);
+        const bounds = L.latLngBounds(
+          [Math.min(...lats), Math.min(...lons)],
+          [Math.max(...lats), Math.max(...lons)]
+        );
+        map.fitBounds(bounds.pad(0.15));
+        setStatus(`Heatmap: ${pts.length.toLocaleString()} cells`);
+        updateBadge(`${pts.length.toLocaleString()} cells`);
+      })
+      .catch(e => setStatus(`Heatmap error: ${e}`, false));
+  }
+
+  // ── Playback ─────────────────────────────────────────────
+  function clearPlaybackLayer() {
+    if (histLayerGrp) histLayerGrp.clearLayers();
+    histMarkers = {}; histTrails = {};
+  }
+
+  function loadPlayback() {
+    clearHeat();
+    clearPlaybackLayer();
+    setStatus("Loading…");
+    const step = 30;
+    fetch(`/api/history/range?start=${histStart}&end=${histEnd}&step=${step}`)
+      .then(r => r.json())
+      .then(resp => {
+        histData  = resp.aircraft || {};
+        const count = Object.keys(histData).length;
+        if (!count) { setStatus("No data in range", false); return; }
+        setStatus(`${count} aircraft, ${resp.count.toLocaleString()} points — drag slider or press ▶`);
+        updateBadge(`${count} aircraft`);
+        // Reset playback position to start
+        histCur = histStart;
+        updateSlider();
+        renderPlaybackAt(histCur);
+      })
+      .catch(e => setStatus(`Load error: ${e}`, false));
+  }
+
+  function loadData() {
+    histStart = fromLocalDatetimeValue(document.getElementById("hist-start").value);
+    histEnd   = fromLocalDatetimeValue(document.getElementById("hist-end").value);
+    if (!histStart || !histEnd || histEnd <= histStart) {
+      setStatus("Invalid time range", false); return;
+    }
+    if (histCurMode === "heatmap") loadHeatmap();
+    else loadPlayback();
+  }
+
+  // ── Playback rendering ────────────────────────────────────
+  function getAircraftAtTime(pts, ts) {
+    let best = null;
+    for (const p of pts) {
+      if (p.ts <= ts) best = p;
+      else break;
+    }
+    return (best && ts - best.ts <= STALE_SEC) ? best : null;
+  }
+
+  function getTrailPoints(pts, ts) {
+    const trailStart = ts - TRAIL_SEC;
+    return pts.filter(p => p.ts >= trailStart && p.ts <= ts).map(p => [p.lat, p.lon]);
+  }
+
+  function histPopupHtml(icao, pos) {
+    const rows = [];
+    rows.push(`<div style="font-weight:700;font-size:0.9rem;margin-bottom:4px;">${pos.callsign || icao}</div>`);
+    if (pos.callsign) rows.push(`<div><span class="ac-pop-lbl">ICAO</span> ${icao}</div>`);
+    if (pos.altitude != null)
+      rows.push(`<div><span class="ac-pop-lbl">Altitude</span> ${pos.altitude.toLocaleString()} ft</div>`);
+    if (pos.ground_speed != null)
+      rows.push(`<div><span class="ac-pop-lbl">Speed</span> ${Math.round(pos.ground_speed)} kts</div>`);
+    if (pos.track != null)
+      rows.push(`<div><span class="ac-pop-lbl">Heading</span> ${Math.round(pos.track)}&deg;</div>`);
+    if (pos.on_ground)
+      rows.push(`<div><span class="ac-pop-lbl">Status</span> On ground</div>`);
+    if (pos.lat != null && pos.lon != null)
+      rows.push(`<div><span class="ac-pop-lbl">Position</span> ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}</div>`);
+    if (pos.ts) {
+      const d = new Date(pos.ts * 1000);
+      rows.push(`<div><span class="ac-pop-lbl">Time</span> ${d.toLocaleTimeString()}</div>`);
+    }
+    return `<div class="ac-popup">${rows.join("")}</div>`;
+  }
+
+  function renderPlaybackAt(ts) {
+    const visible = new Set();
+    for (const [icao, pts] of Object.entries(histData)) {
+      const pos = getAircraftAtTime(pts, ts);
+      if (!pos) continue;
+      visible.add(icao);
+      const ll = [pos.lat, pos.lon];
+      // Marker
+      if (!histMarkers[icao]) {
+        const icon = L.divIcon({
+          className: "",
+          html: `<div style="width:8px;height:8px;border-radius:50%;background:#4e8fd6;border:1px solid #fff;"></div>`,
+          iconSize: [8, 8], iconAnchor: [4, 4],
+        });
+        histMarkers[icao] = L.marker(ll, {icon, title: icao}).addTo(histLayerGrp);
+        histMarkers[icao].bindPopup("", { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
+        histMarkers[icao].on("mouseover", function () { this.openPopup(); });
+        histMarkers[icao].on("mouseout",  function () { this.closePopup(); });
+      } else {
+        histMarkers[icao].setLatLng(ll);
+      }
+      // Update popup content
+      histMarkers[icao].setPopupContent(histPopupHtml(icao, pos));
+      // Trail
+      const trail = getTrailPoints(pts, ts);
+      if (trail.length >= 2) {
+        if (!histTrails[icao]) {
+          histTrails[icao] = L.polyline(trail, {color:"#4e8fd6", weight:1.5, opacity:0.6}).addTo(histLayerGrp);
+        } else {
+          histTrails[icao].setLatLngs(trail);
+        }
+      } else if (histTrails[icao]) {
+        histTrails[icao].setLatLngs([]);
+      }
+    }
+    // Remove markers/trails for aircraft no longer visible
+    for (const icao of Object.keys(histMarkers)) {
+      if (!visible.has(icao)) {
+        histLayerGrp.removeLayer(histMarkers[icao]);
+        delete histMarkers[icao];
+        if (histTrails[icao]) { histLayerGrp.removeLayer(histTrails[icao]); delete histTrails[icao]; }
+      }
+    }
+    // Update label
+    document.getElementById("hist-time-lbl").textContent = fmtTs(ts);
+    updateBadge(`${visible.size} aircraft`);
+  }
+
+  function updateSlider() {
+    const slider = document.getElementById("hist-slider");
+    if (!slider || histEnd <= histStart) return;
+    const pct = (histCur - histStart) / (histEnd - histStart);
+    slider.value = Math.round(pct * 1000);
+  }
+
+  function updateBadge(text) {
+    const el = document.getElementById("hist-ac-badge");
+    if (el) el.textContent = text;
+  }
+
+  // ── Play loop ─────────────────────────────────────────────
+  function startPlay() {
+    if (histPlaying) return;
+    if (!Object.keys(histData).length) return;
+    // Wrap around if at end
+    if (histCur >= histEnd) histCur = histStart;
+    histPlaying = true;
+    document.getElementById("hist-play-btn").textContent = "⏸";
+    const speed = parseInt(document.getElementById("hist-speed").value) || 300;
+    const tickMs = 100;
+    const advanceSec = speed * tickMs / 1000;
+    histTimer = setInterval(() => {
+      histCur += advanceSec;
+      if (histCur >= histEnd) {
+        histCur = histEnd;
+        updateSlider();
+        renderPlaybackAt(histCur);
+        stopPlay();
+        return;
+      }
+      updateSlider();
+      renderPlaybackAt(histCur);
+    }, tickMs);
+  }
+
+  function stopPlay() {
+    histPlaying = false;
+    if (histTimer) { clearInterval(histTimer); histTimer = null; }
+    const btn = document.getElementById("hist-play-btn");
+    if (btn) btn.textContent = "▶";
+  }
+
+  // ── Wire up controls ─────────────────────────────────────
+  document.addEventListener("DOMContentLoaded", () => {
+    // Navbar history button
+    document.getElementById("btn-history-mode").addEventListener("click", () => {
+      if (histActive) exitHistory(); else enterHistory();
+    });
+
+    // Live badge also exits history mode when clicked
+    document.getElementById("nav-receiver-badge").addEventListener("click", () => {
+      if (histActive) exitHistory();
+    });
+
+    // Preset buttons
+    document.querySelectorAll(".hist-preset").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".hist-preset").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const hours = parseInt(btn.dataset.hours);
+        const now = Date.now() / 1000;
+        histEnd   = now;
+        histStart = now - hours * 3600;
+        document.getElementById("hist-end").value   = toLocalDatetimeValue(histEnd);
+        document.getElementById("hist-start").value = toLocalDatetimeValue(histStart);
+      });
+    });
+
+    // Mode toggle
+    document.getElementById("hist-mode-playback").addEventListener("click", () => {
+      histCurMode = "playback";
+      document.getElementById("hist-mode-playback").classList.add("active");
+      document.getElementById("hist-mode-heatmap").classList.remove("active");
+      document.getElementById("hist-player").style.display = "";
+      clearHeat();
+      // Auto-load playback if a time range is set but no playback data in memory
+      if (histStart && !Object.keys(histData).length) loadPlayback();
+    });
+    document.getElementById("hist-mode-heatmap").addEventListener("click", () => {
+      histCurMode = "heatmap";
+      document.getElementById("hist-mode-heatmap").classList.add("active");
+      document.getElementById("hist-mode-playback").classList.remove("active");
+      document.getElementById("hist-player").style.display = "none";
+      stopPlay();
+      clearPlaybackLayer();
+      // Auto-load the full-range heatmap if a time range is already loaded
+      if (histStart) loadHeatmap();
+    });
+
+    // Load
+    document.getElementById("hist-load-btn").addEventListener("click", loadData);
+
+    // Play/pause
+    document.getElementById("hist-play-btn").addEventListener("click", () => {
+      if (histPlaying) stopPlay(); else startPlay();
+    });
+
+    // Slider drag
+    document.getElementById("hist-slider").addEventListener("input", e => {
+      stopPlay();
+      const pct = parseInt(e.target.value) / 1000;
+      histCur = histStart + pct * (histEnd - histStart);
+      renderPlaybackAt(histCur);
+    });
+  });
+})();
+</script>
+</body>
+</html>
