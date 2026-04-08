@@ -81,10 +81,6 @@ def main():
         format="%(asctime)s %(levelname)-8s %(name)-20s %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Suppress noisy loggers
-    logging.getLogger("engineio").setLevel(logging.WARNING)
-    logging.getLogger("socketio").setLevel(logging.WARNING)
-
     log = logging.getLogger("main")
 
     # ── Load config ──────────────────────────────────────────
@@ -132,14 +128,14 @@ def main():
 
     # ── Web server ────────────────────────────────────────────
     from web.server import create_app
-    app, _ = create_app(config, registry, tak_sender, receiver, server_manager, store, gpsd)
+    app = create_app(config, registry, tak_sender, receiver, server_manager, store, gpsd)
 
     log.info("Web UI: http://localhost:%d", config.web.port)
     log.info("Press Ctrl+C to stop")
 
-    from waitress import serve
+    import uvicorn
     try:
-        serve(app, host=config.web.host, port=config.web.port, threads=32)
+        uvicorn.run(app, host=config.web.host, port=config.web.port, log_level="warning")
     except KeyboardInterrupt:
         log.info("Shutting down...")
         receiver.stop()

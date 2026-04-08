@@ -1,6 +1,10 @@
 import logging
 import math
-from flask import Blueprint, jsonify, request, render_template, current_app, send_from_directory, make_response, Response
+from pathlib import Path
+
+from fastapi import APIRouter, Request, Query, HTTPException
+from fastapi.responses import JSONResponse, FileResponse, Response
+from starlette.templating import Jinja2Templates
 
 from config import AppConfig, update_config_from_dict, save_config, config_to_dict
 from aircraft.registry import AircraftRegistry
@@ -8,43 +12,47 @@ from capabilities import HAS_RTLSDR, HAS_HACKRF, HAS_UHD, probe_gpsd
 
 log = logging.getLogger(__name__)
 
+_web_dir = Path(__file__).parent
 
-def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None):
 
-    @app.route("/")
-    def index():
+def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinja2Templates, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None):
+
+    router = APIRouter()
+
+    @router.get("/")
+    def index(request: Request):
         from version import __version__
-        return render_template(
-            "index.html",
-            config=config,
-            has_rtlsdr=HAS_RTLSDR,
-            has_hackrf=HAS_HACKRF,
-            has_usrp=HAS_UHD,
-            has_gpsd=probe_gpsd(config.location.gpsd_host, config.location.gpsd_port),
-            version=__version__,
+        return templates.TemplateResponse(request, "index.html", {
+            "config": config,
+            "has_rtlsdr": HAS_RTLSDR,
+            "has_hackrf": HAS_HACKRF,
+            "has_usrp": HAS_UHD,
+            "has_gpsd": probe_gpsd(config.location.gpsd_host, config.location.gpsd_port),
+            "version": __version__,
+        })
+
+    @router.get("/api/gpsd/probe")
+    def gpsd_probe(host: str = Query(None), port: int = Query(None)):
+        if host is None:
+            host = config.location.gpsd_host
+        if port is None:
+            port = config.location.gpsd_port
+        return {"available": probe_gpsd(host, port)}
+
+    @router.get("/tile-sw.js")
+    def tile_sw():
+        path = str(_web_dir / "static" / "tile-sw.js")
+        return FileResponse(
+            path,
+            media_type="application/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
         )
 
-    @app.route("/api/gpsd/probe")
-    def gpsd_probe():
-        host = request.args.get("host", config.location.gpsd_host)
-        port = int(request.args.get("port", config.location.gpsd_port))
-        return jsonify({"available": probe_gpsd(host, port)})
-
-    @app.route("/tile-sw.js")
-    def tile_sw():
-        import os
-        static_dir = os.path.join(os.path.dirname(__file__), "static")
-        resp = make_response(send_from_directory(static_dir, "tile-sw.js"))
-        resp.headers["Content-Type"] = "application/javascript"
-        resp.headers["Service-Worker-Allowed"] = "/"
-        resp.headers["Cache-Control"] = "no-cache"
-        return resp
-
-    @app.route("/api/aircraft")
+    @router.get("/api/aircraft")
     def get_aircraft():
-        return jsonify(registry.get_all_dicts())
+        return registry.get_all_dicts()
 
-    @app.route("/data/aircraft.json")
+    @router.get("/data/aircraft.json")
     def dump1090_aircraft_json():
         """dump1090-compatible aircraft.json endpoint."""
         import time as _time
@@ -76,9 +84,9 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                 entry["category"] = ac.category
             aircraft_list.append(entry)
         total_msgs = receiver.status().get("messages", 0) if receiver else 0
-        return jsonify({"now": _time.time(), "messages": total_msgs, "aircraft": aircraft_list})
+        return {"now": _time.time(), "messages": total_msgs, "aircraft": aircraft_list}
 
-    @app.route("/data/receiver.json")
+    @router.get("/data/receiver.json")
     def dump1090_receiver_json():
         """dump1090-compatible receiver.json endpoint."""
         loc = config.location
@@ -86,9 +94,9 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
         if loc.lat and loc.lon:
             entry["lat"] = loc.lat
             entry["lon"] = loc.lon
-        return jsonify(entry)
+        return entry
 
-    @app.route("/api/stats")
+    @router.get("/api/stats")
     def get_stats():
         from config import config_to_dict
         from .events import web_client_status
@@ -118,17 +126,20 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
             }
         except Exception:
             pass
-        return jsonify(stats)
+        return stats
 
-    @app.route("/api/config", methods=["GET"])
+    @router.get("/api/config")
     def get_config():
-        return jsonify(config_to_dict(config))
+        return config_to_dict(config)
 
-    @app.route("/api/config", methods=["POST"])
-    def post_config():
-        data = request.get_json(silent=True)
+    @router.post("/api/config")
+    async def post_config(request: Request):
+        try:
+            data = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
         if not data:
-            return jsonify({"error": "invalid JSON"}), 400
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
         try:
             update_config_from_dict(config, data)
             save_config(config)
@@ -163,15 +174,15 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                     config.location.lat = 0.0
                     config.location.lon = 0.0
             log.info("Config updated and saved")
-            return jsonify({"ok": True, "config": config_to_dict(config)})
+            return {"ok": True, "config": config_to_dict(config)}
         except Exception as e:
             log.error("Config update error: %s", e)
-            return jsonify({"error": str(e)}), 500
+            return JSONResponse({"error": str(e)}, status_code=500)
 
-    @app.route("/api/rtlsdr/devices")
+    @router.get("/api/rtlsdr/devices")
     def get_rtlsdr_devices():
         if not HAS_RTLSDR:
-            return jsonify([])
+            return []
         try:
             from rtlsdr import librtlsdr
             count = librtlsdr.rtlsdr_get_device_count()
@@ -185,14 +196,14 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                 except Exception:
                     name = f"RTL-SDR Device {i}"
                 devices.append({"index": i, "name": name})
-            return jsonify(devices)
+            return devices
         except Exception as e:
             log.warning("RTL-SDR device enumeration failed: %s", e)
-            return jsonify({"error": str(e)}), 500
+            return JSONResponse({"error": str(e)}, status_code=500)
 
-    @app.route("/api/rtlsdr/gain/preview", methods=["POST"])
-    def rtlsdr_gain_preview():
-        data = request.get_json(silent=True) or {}
+    @router.post("/api/rtlsdr/gain/preview")
+    async def rtlsdr_gain_preview(request: Request):
+        data = await request.json() if await request.body() else {}
         agc  = bool(data.get("agc", False))
         try:
             gain = float(data.get("gain", 49.6))
@@ -205,23 +216,23 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                   type(receiver).__name__, type(r).__name__ if r else None,
                   hasattr(r, "apply_gain_preview") if r else False)
         if r is None or not hasattr(r, "apply_gain_preview"):
-            return jsonify({"ok": False, "error": "RTL-SDR not active"})
+            return {"ok": False, "error": "RTL-SDR not active"}
         ok = r.apply_gain_preview(agc, gain)
         if not ok:
-            return jsonify({"ok": False, "error": "SDR device not open"})
-        return jsonify({"ok": ok})
+            return {"ok": False, "error": "SDR device not open"}
+        return {"ok": ok}
 
-    @app.route("/api/rtlsdr/gain/revert", methods=["POST"])
+    @router.post("/api/rtlsdr/gain/revert")
     def rtlsdr_gain_revert():
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "revert_gain_preview"):
-            return jsonify({"ok": False, "error": "RTL-SDR not active"}), 400
+            return JSONResponse({"ok": False, "error": "RTL-SDR not active"}, status_code=400)
         ok = r.revert_gain_preview()
-        return jsonify({"ok": ok})
+        return {"ok": ok}
 
-    @app.route("/api/hackrf/gain/preview", methods=["POST"])
-    def hackrf_gain_preview():
-        data = request.get_json(silent=True) or {}
+    @router.post("/api/hackrf/gain/preview")
+    async def hackrf_gain_preview(request: Request):
+        data = await request.json() if await request.body() else {}
         try:
             lna = int(data.get("lna_gain", 16))
             vga = int(data.get("vga_gain", 20))
@@ -230,100 +241,97 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
             lna = max(0, min(40, round(lna / 8) * 8))
             vga = max(0, min(62, round(vga / 2) * 2))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Invalid gain values"}), 400
+            return JSONResponse({"ok": False, "error": "Invalid gain values"}, status_code=400)
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "apply_gain_preview") or r.__class__.__name__ != "HackRFReceiver":
-            return jsonify({"ok": False, "error": "HackRF not active"})
+            return {"ok": False, "error": "HackRF not active"}
         ok = r.apply_gain_preview(lna, vga, amp)
         if not ok:
-            return jsonify({"ok": False, "error": "HackRF device not open"})
-        return jsonify({"ok": True})
+            return {"ok": False, "error": "HackRF device not open"}
+        return {"ok": True}
 
-    @app.route("/api/hackrf/gain/revert", methods=["POST"])
+    @router.post("/api/hackrf/gain/revert")
     def hackrf_gain_revert():
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "revert_gain_preview") or r.__class__.__name__ != "HackRFReceiver":
-            return jsonify({"ok": False, "error": "HackRF not active"}), 400
+            return JSONResponse({"ok": False, "error": "HackRF not active"}, status_code=400)
         ok = r.revert_gain_preview()
-        return jsonify({"ok": ok})
+        return {"ok": ok}
 
-    @app.route("/api/usrp/gain/preview", methods=["POST"])
-    def usrp_gain_preview():
-        data = request.get_json(silent=True) or {}
+    @router.post("/api/usrp/gain/preview")
+    async def usrp_gain_preview(request: Request):
+        data = await request.json() if await request.body() else {}
         try:
             gain = float(data.get("gain", 40.0))
             gain = max(0.0, min(76.0, gain))
         except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "Invalid gain value"}), 400
+            return JSONResponse({"ok": False, "error": "Invalid gain value"}, status_code=400)
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "apply_gain_preview") or r.__class__.__name__ != "USRPReceiver":
-            return jsonify({"ok": False, "error": "USRP not active"})
+            return {"ok": False, "error": "USRP not active"}
         ok = r.apply_gain_preview(gain)
         if not ok:
-            return jsonify({"ok": False, "error": "USRP device not open"})
-        return jsonify({"ok": True})
+            return {"ok": False, "error": "USRP device not open"}
+        return {"ok": True}
 
-    @app.route("/api/usrp/gain/revert", methods=["POST"])
+    @router.post("/api/usrp/gain/revert")
     def usrp_gain_revert():
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "revert_gain_preview") or r.__class__.__name__ != "USRPReceiver":
-            return jsonify({"ok": False, "error": "USRP not active"}), 400
+            return JSONResponse({"ok": False, "error": "USRP not active"}, status_code=400)
         ok = r.revert_gain_preview()
-        return jsonify({"ok": ok})
+        return {"ok": ok}
 
-    @app.route("/api/history/<icao>")
-    def get_history(icao):
+    @router.get("/api/history/{icao}")
+    def get_history(icao: str):
         if store is None:
-            return jsonify([])
-        return jsonify(store.get_track(icao.upper()))
+            return []
+        return store.get_track(icao.upper())
 
-    @app.route("/api/history/range")
-    def history_range():
+    @router.get("/api/history/range")
+    def history_range(end: float = Query(None), start: float = Query(None), step: int = Query(30)):
         import time as _t
         if store is None:
-            return jsonify({"aircraft": {}, "start": 0, "end": 0, "count": 0})
+            return {"aircraft": {}, "start": 0, "end": 0, "count": 0}
         now = _t.time()
-        try:
-            end   = float(request.args.get("end",   now))
-            start = float(request.args.get("start", end - 86400))
-            step  = int(request.args.get("step", 30))
-        except ValueError:
-            return jsonify({"error": "bad params"}), 400
+        if end is None:
+            end = now
+        if start is None:
+            start = end - 86400
         if end - start > 86400:
             start = end - 86400
         data  = store.get_range(start, end, step)
         count = sum(len(v) for v in data.values())
-        return jsonify({"aircraft": data, "start": start, "end": end, "count": count})
+        return {"aircraft": data, "start": start, "end": end, "count": count}
 
-    @app.route("/api/heatmap")
-    def get_heatmap():
+    @router.get("/api/heatmap")
+    def get_heatmap(end: float = Query(None), start: float = Query(None)):
         import time as _t
         if store is None:
-            return jsonify([])
+            return []
         now = _t.time()
-        try:
-            end   = float(request.args.get("end",   now))
-            start = float(request.args.get("start", end - 86400))
-        except ValueError:
-            return jsonify({"error": "bad params"}), 400
+        if end is None:
+            end = now
+        if start is None:
+            start = end - 86400
         if end - start > 86400:
             start = end - 86400
-        return jsonify(store.get_heatmap_cells(start, end))
+        return store.get_heatmap_cells(start, end)
 
-    @app.route("/api/store/stats")
+    @router.get("/api/store/stats")
     def store_stats():
         if store is None:
-            return jsonify({"row_count": 0, "size_bytes": 0, "db_path": ""})
-        return jsonify(store.stats())
+            return {"row_count": 0, "size_bytes": 0, "db_path": ""}
+        return store.stats()
 
-    @app.route("/api/store/reset", methods=["POST"])
+    @router.post("/api/store/reset")
     def store_reset():
         if store is None:
-            return jsonify({"cleared": 0})
+            return {"cleared": 0}
         count = store.clear()
-        return jsonify({"cleared": count})
+        return {"cleared": count}
 
-    @app.route("/api/location")
+    @router.get("/api/location")
     def get_location():
         from config import LOCATION_NONE, RECEIVER_JSON
         loc = config.location
@@ -333,51 +341,49 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                 rlat = getattr(receiver, "receiver_lat", None)
                 rlon = getattr(receiver, "receiver_lon", None)
                 if rlat is not None and rlon is not None:
-                    return jsonify({"mode": "receiver", "lat": rlat, "lon": rlon})
-            return jsonify({"mode": "none", "lat": None, "lon": None})
+                    return {"mode": "receiver", "lat": rlat, "lon": rlon}
+            return {"mode": "none", "lat": None, "lon": None}
         if loc.lat == 0.0 and loc.lon == 0.0:
-            return jsonify({"mode": loc.mode, "lat": None, "lon": None})
-        return jsonify({"mode": loc.mode, "lat": loc.lat, "lon": loc.lon})
+            return {"mode": loc.mode, "lat": None, "lon": None}
+        return {"mode": loc.mode, "lat": loc.lat, "lon": loc.lon}
 
-    @app.route("/tiles/<source>/<int:z>/<int:x>/<int:y>")
-    def proxy_tile(source, z, x, y):
+    @router.get("/tiles/{source}/{z}/{x}/{y}")
+    def proxy_tile(source: str, z: int, x: int, y: int):
         from .tile_proxy import fetch_tile
         try:
             data, ct = fetch_tile(source, z, x, y)
         except ValueError as e:
-            return str(e), 404
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             log.warning("Tile fetch failed %s/%d/%d/%d: %s", source, z, x, y, e)
-            return "Tile unavailable", 502
-        resp = Response(data, content_type=ct)
-        resp.headers["Cache-Control"] = "public, max-age=604800"  # 7 days browser cache
-        return resp
+            raise HTTPException(status_code=502, detail="Tile unavailable")
+        return Response(content=data, media_type=ct, headers={"Cache-Control": "public, max-age=604800"})
 
-    @app.route("/api/tiles/stats")
+    @router.get("/api/tiles/stats")
     def tile_cache_stats():
         from .tile_proxy import cache_stats
-        return jsonify(cache_stats())
+        return cache_stats()
 
-    @app.route("/api/tiles/clear", methods=["POST"])
+    @router.post("/api/tiles/clear")
     def tile_cache_clear():
         from .tile_proxy import clear_cache
         stats = clear_cache()
         log.info("Tile cache cleared: %d tiles, %d bytes", stats["tiles"], stats["bytes"])
-        return jsonify({"ok": True, **stats})
+        return {"ok": True, **stats}
 
-    @app.route("/api/tak/send/<icao>", methods=["POST"])
-    def tak_send_single(icao):
+    @router.post("/api/tak/send/{icao}")
+    def tak_send_single(icao: str):
         if not tak_sender:
-            return jsonify({"ok": False, "error": "TAK sender not running"}), 503
+            return JSONResponse({"ok": False, "error": "TAK sender not running"}, status_code=503)
         ok, reason = tak_sender.send_single(icao.upper())
-        return jsonify({"ok": ok, "error": reason if not ok else None, "message": reason})
+        return {"ok": ok, "error": reason if not ok else None, "message": reason}
 
     # ------------------------------------------------------------------
     # Peer update routes — serve this app's files to sibling instances
     # and pull updates from the configured JSON API server.
     # ------------------------------------------------------------------
 
-    @app.route("/api/update/manifest")
+    @router.get("/api/update/manifest")
     def update_manifest():
         import hashlib as _hl
         from .updater import app_files
@@ -386,25 +392,23 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
             with open(abs_path, "rb") as f:
                 h = _hl.sha256(f.read()).hexdigest()
             files.append({"path": rel, "hash": h})
-        return jsonify({"app": "1090toTAK", "files": files})
+        return {"app": "1090toTAK", "files": files}
 
-    @app.route("/api/update/file")
-    def update_file_serve():
+    @router.get("/api/update/file")
+    def update_file_serve(path: str = Query("")):
         import os as _os
-        from flask import abort, send_file
         from .updater import safe_abs_path
-        path = request.args.get("path", "")
         if not path:
-            abort(400)
+            raise HTTPException(status_code=400)
         try:
             abs_path = safe_abs_path(path)
         except ValueError:
-            abort(403)
+            raise HTTPException(status_code=403)
         if not _os.path.isfile(abs_path):
-            abort(404)
-        return send_file(abs_path, mimetype="text/plain")
+            raise HTTPException(status_code=404)
+        return FileResponse(abs_path, media_type="text/plain")
 
-    @app.route("/api/update/check")
+    @router.get("/api/update/check")
     def update_check():
         from .updater import check_for_updates, check_for_updates_github, get_state
         if config.update.source == "github":
@@ -412,15 +416,15 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
         else:
             host = config.update.host
             if not host:
-                return jsonify({"available": False, "reason": "no update server configured"})
+                return {"available": False, "reason": "no update server configured"}
             changed = check_for_updates(host, config.update.port)
         if changed is None:
             s = get_state()
-            return jsonify({"available": False, "error": s.get("error"), **s})
-        return jsonify({"available": bool(changed), "files": changed, "total": len(changed)})
+            return {"available": False, "error": s.get("error"), **s}
+        return {"available": bool(changed), "files": changed, "total": len(changed)}
 
-    @app.route("/api/update/pull", methods=["POST"])
-    def update_pull():
+    @router.post("/api/update/pull")
+    async def update_pull(request: Request):
         import os as _os
         import urllib.request as _urlreq
         import urllib.parse as _urlparse
@@ -429,8 +433,11 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
         port = config.update.port
         is_github = config.update.source == "github"
         if not is_github and not host:
-            return jsonify({"ok": False, "error": "no update server configured"})
-        data = request.get_json(force=True) or {}
+            return {"ok": False, "error": "no update server configured"}
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
         files_to_pull = data.get("files", [])
         results = []
         for path in files_to_pull:
@@ -454,9 +461,9 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                 results.append({"path": path, "ok": True})
             except Exception as e:
                 results.append({"path": path, "ok": False, "error": _fmt_error(e, url)})
-        return jsonify({"ok": all(r["ok"] for r in results), "results": results})
+        return {"ok": all(r["ok"] for r in results), "results": results}
 
-    @app.route("/api/restart", methods=["POST"])
+    @router.post("/api/restart")
     def restart_app():
         import os as _os
         import sys as _sys
@@ -470,4 +477,6 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
             _os._exit(0)
 
         _th.Thread(target=_do_restart, daemon=True).start()
-        return jsonify({"ok": True})
+        return {"ok": True}
+
+    return router

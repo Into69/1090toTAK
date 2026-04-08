@@ -1076,7 +1076,7 @@
                     <span class="badge bg-success" id="web-server-badge">:{{ config.web.port }}</span>
                   </div>
                   <div class="card-body py-2">
-                    <small class="text-muted">Web UI &amp; Socket.IO — always running on port {{ config.web.port }}.</small>
+                    <small class="text-muted">Web UI &amp; WebSocket — always running on port {{ config.web.port }}.</small>
                   </div>
                 </div>
               </div>
@@ -1200,7 +1200,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/milsymbol@2.2.0/dist/milsymbol.js"></script>
 
 <script>
@@ -1231,6 +1230,7 @@ const map = L.map("map", {
 });
 
 map.on("click", () => {
+  map.closePopup();
   if (selectedIcao) {
     selectedIcao = null;
     renderDetail(null);
@@ -1570,6 +1570,21 @@ function acPopupHtml(ac) {
   return `<div class="ac-popup">${rows.join("")}</div>`;
 }
 
+function openPopupSmart(marker) {
+  const px = map.latLngToContainerPoint(marker.getLatLng());
+  const popup = marker.getPopup();
+  if (!popup) { marker.openPopup(); return; }
+  const icon = marker.options.icon.options;
+  const anchorY = (icon.iconAnchor ? icon.iconAnchor[1] : (icon.iconSize ? icon.iconSize[1] / 2 : 16));
+  // If marker is in the top 180px of the map, show popup below the icon
+  if (px.y < 180) {
+    popup.options.offset = L.point(0, anchorY * 2 + 8);
+  } else {
+    popup.options.offset = L.point(0, 0);
+  }
+  marker.openPopup();
+}
+
 function updateMarker(ac) {
   if (ac.lat == null || ac.lon == null) return;
   const latlng = [ac.lat, ac.lon];
@@ -1580,7 +1595,7 @@ function updateMarker(ac) {
   } else {
     const m = L.marker(latlng, { icon })
       .on("click", () => selectAircraft(ac.icao))
-      .on("mouseover", function () { this.openPopup(); })
+      .on("mouseover", function () { openPopupSmart(this); })
       .on("mouseout",  function () { this.closePopup(); });
     // Don't add to map while in history mode
     if (!document.body.classList.contains("history-active")) m.addTo(map);
@@ -1800,11 +1815,172 @@ function applyAutoView() {
 }
 
 // ============================================================
-// SOCKET.IO
+// WEBSOCKET
 // ============================================================
-const socket = io({ transports: ["polling", "websocket"] });
+let ws = null;
+let wsConnected = false;
 
-// Populate aircraft immediately on page load — don't wait for first socket push
+function wsSend(type, data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type, data }));
+  }
+}
+
+function connectWebSocket() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    wsConnected = true;
+    document.getElementById("nav-receiver-badge").className = "badge bg-success";
+    document.getElementById("nav-receiver-badge").textContent = "LIVE";
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    document.getElementById("nav-receiver-badge").className = "badge bg-danger";
+    document.getElementById("nav-receiver-badge").textContent = "OFFLINE";
+    setTimeout(connectWebSocket, 2000);
+  };
+
+  ws.onerror = () => {};
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    switch (msg.type) {
+      case "aircraft_update": {
+        const data = msg.data;
+        lastSocketUpdate = Date.now();
+        totalMsgCount++;
+        document.getElementById("status-msg-count").textContent =
+          `${totalMsgCount} upd`;
+
+        const seen = new Set();
+        for (const ac of data.aircraft) {
+          seen.add(ac.icao);
+          aircraft[ac.icao] = ac;
+          updateMarker(ac);
+        }
+
+        const inHistory = document.body.classList.contains("history-active");
+
+        if (data.full && !inHistory) {
+          for (const icao of Object.keys(aircraft)) {
+            if (!seen.has(icao)) {
+              delete aircraft[icao];
+              removeMarker(icao);
+            }
+          }
+        }
+
+        if (!inHistory) {
+          for (const [icao, ac] of Object.entries(aircraft)) {
+            if (ac.age > aircraftTTL) {
+              delete aircraft[icao];
+              removeMarker(icao);
+            }
+          }
+        }
+
+        renderTable();
+        applyAutoView();
+
+        if (selectedIcao && aircraft[selectedIcao]) {
+          renderDetail(aircraft[selectedIcao]);
+        }
+        break;
+      }
+      case "aircraft_remove": {
+        if (document.body.classList.contains("history-active")) break;
+        const icao = msg.data.icao;
+        delete aircraft[icao];
+        removeMarker(icao);
+        if (selectedIcao === icao) {
+          selectedIcao = null;
+          renderDetail(null);
+          clearTrack();
+        }
+        renderTable();
+        break;
+      }
+      case "spectrum_update": {
+        const sdata = msg.data;
+        spectrumData = sdata.bins;
+        if (!spectrumPeak || spectrumPeak.length !== spectrumData.length) {
+          spectrumPeak = [...spectrumData];
+        } else {
+          spectrumPeak = spectrumPeak.map((p, i) => Math.max(p, spectrumData[i]));
+        }
+        const hint = document.getElementById("spectrum-tab-hint");
+        if (hint) hint.textContent = `${sdata.bins.length} bins · ${(sdata.sample_rate / 1e6).toFixed(0)} MHz BW · live`;
+        requestAnimationFrame(drawSpectrum);
+        break;
+      }
+      case "signal_quality_update": {
+        const sqdata = msg.data;
+        // map-overlay popup
+        const popup  = document.getElementById("signal-quality-popup");
+        const icon   = document.getElementById("sq-icon");
+        const title  = document.getElementById("sq-title");
+        const detail = document.getElementById("sq-detail");
+        if (popup) {
+          popup.classList.remove("sq-overload", "sq-weak");
+          icon.className = "bi";
+          if (sqdata.status === "overload") {
+            popup.style.display = "flex";
+            popup.classList.add("sq-overload");
+            icon.classList.add("bi-exclamation-triangle-fill", "sq-icon-overload");
+            title.textContent  = "Signal Overload";
+            detail.textContent = `${sqdata.clip_pct.toFixed(1)}% saturated — reduce gain`;
+          } else if (sqdata.status === "weak") {
+            popup.style.display = "flex";
+            popup.classList.add("sq-weak");
+            icon.classList.add("bi-reception-1", "sq-icon-weak");
+            title.textContent  = "Weak Signal";
+            detail.textContent = `Noise floor ${sqdata.noise_floor_dbfs.toFixed(0)} dBFS — check antenna / increase gain`;
+          } else {
+            popup.style.display = "none";
+          }
+        }
+        // spectrum panel metrics
+        const floorEl = document.getElementById("sq-spec-floor");
+        const clipEl  = document.getElementById("sq-spec-clip");
+        const badge   = document.getElementById("sq-spec-badge");
+        if (!floorEl) break;
+        if (sqdata.status === "none") {
+          floorEl.textContent = "—";
+          clipEl.textContent  = "—";
+          badge.textContent   = "—";
+          badge.className = "badge bg-secondary ms-auto";
+          break;
+        }
+        floorEl.textContent = `${sqdata.noise_floor_dbfs.toFixed(1)} dBFS`;
+        clipEl.textContent  = `${sqdata.clip_pct.toFixed(1)}%`;
+        if (sqdata.status === "overload") {
+          badge.textContent = "OVERLOAD";
+          badge.className   = "badge ms-auto";
+          badge.style.background = "#ff4444";
+          badge.style.color = "#fff";
+        } else if (sqdata.status === "weak") {
+          badge.textContent = "WEAK";
+          badge.className   = "badge ms-auto";
+          badge.style.background = "#ffc107";
+          badge.style.color = "#000";
+        } else {
+          badge.textContent = "OK";
+          badge.className   = "badge ms-auto";
+          badge.style.background = "#198754";
+          badge.style.color = "#fff";
+        }
+        break;
+      }
+    }
+  };
+}
+
+connectWebSocket();
+
+// Populate aircraft immediately on page load — don't wait for first WS push
 fetch("/api/aircraft")
   .then(r => r.json())
   .then(list => {
@@ -1816,30 +1992,6 @@ fetch("/api/aircraft")
     applyAutoView();
   })
   .catch(() => {});
-
-socket.on("connect", () => {
-  document.getElementById("nav-receiver-badge").className = "badge bg-success";
-  document.getElementById("nav-receiver-badge").textContent = "LIVE";
-});
-
-socket.on("disconnect", () => {
-  document.getElementById("nav-receiver-badge").className = "badge bg-danger";
-  document.getElementById("nav-receiver-badge").textContent = "OFFLINE";
-});
-
-socket.on("aircraft_remove", data => {
-  // Don't remove aircraft while in history mode — preserve last known positions
-  if (document.body.classList.contains("history-active")) return;
-  const icao = data.icao;
-  delete aircraft[icao];
-  removeMarker(icao);
-  if (selectedIcao === icao) {
-    selectedIcao = null;
-    renderDetail(null);
-    clearTrack();
-  }
-  renderTable();
-});
 
 // ============================================================
 // SPECTRUM
@@ -1944,129 +2096,11 @@ function drawSpectrum() {
   drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
 }
 
-socket.on("spectrum_update", (data) => {
-  spectrumData = data.bins;
-  if (!spectrumPeak || spectrumPeak.length !== spectrumData.length) {
-    spectrumPeak = [...spectrumData];
-  } else {
-    spectrumPeak = spectrumPeak.map((p, i) => Math.max(p, spectrumData[i]));
-  }
-  const hint = document.getElementById("spectrum-tab-hint");
-  if (hint) hint.textContent = `${data.bins.length} bins · ${(data.sample_rate / 1e6).toFixed(0)} MHz BW · live`;
-  requestAnimationFrame(drawSpectrum);
-});
-
 // Peak hold slow decay — drop 1 dB/s
 setInterval(() => {
   if (spectrumPeak) spectrumPeak = spectrumPeak.map(v => v - 1);
 }, 1000);
 
-socket.on("signal_quality_update", (data) => {
-  // ── map-overlay popup ───────────────────────────────────────────────────
-  const popup  = document.getElementById("signal-quality-popup");
-  const icon   = document.getElementById("sq-icon");
-  const title  = document.getElementById("sq-title");
-  const detail = document.getElementById("sq-detail");
-  if (popup) {
-    popup.classList.remove("sq-overload", "sq-weak");
-    icon.className = "bi";
-    if (data.status === "overload") {
-      popup.style.display = "flex";
-      popup.classList.add("sq-overload");
-      icon.classList.add("bi-exclamation-triangle-fill", "sq-icon-overload");
-      title.textContent  = "Signal Overload";
-      detail.textContent = `${data.clip_pct.toFixed(1)}% saturated — reduce gain`;
-    } else if (data.status === "weak") {
-      popup.style.display = "flex";
-      popup.classList.add("sq-weak");
-      icon.classList.add("bi-reception-1", "sq-icon-weak");
-      title.textContent  = "Weak Signal";
-      detail.textContent = `Noise floor ${data.noise_floor_dbfs.toFixed(0)} dBFS — check antenna / increase gain`;
-    } else {
-      popup.style.display = "none";
-    }
-  }
-
-  // ── spectrum panel metrics ──────────────────────────────────────────────
-  const floorEl = document.getElementById("sq-spec-floor");
-  const clipEl  = document.getElementById("sq-spec-clip");
-  const badge   = document.getElementById("sq-spec-badge");
-  if (!floorEl) return;
-
-  if (data.status === "none") {
-    floorEl.textContent = "—";
-    clipEl.textContent  = "—";
-    badge.textContent   = "—";
-    badge.className = "badge bg-secondary ms-auto";
-    return;
-  }
-
-  floorEl.textContent = `${data.noise_floor_dbfs.toFixed(1)} dBFS`;
-  clipEl.textContent  = `${data.clip_pct.toFixed(1)}%`;
-
-  if (data.status === "overload") {
-    badge.textContent = "OVERLOAD";
-    badge.className   = "badge ms-auto";
-    badge.style.background = "#ff4444";
-    badge.style.color = "#fff";
-  } else if (data.status === "weak") {
-    badge.textContent = "WEAK";
-    badge.className   = "badge ms-auto";
-    badge.style.background = "#ffc107";
-    badge.style.color = "#000";
-  } else {
-    badge.textContent = "OK";
-    badge.className   = "badge ms-auto";
-    badge.style.background = "#3ddc97";
-    badge.style.color = "#000";
-  }
-});
-
-
-socket.on("aircraft_update", (data) => {
-  lastSocketUpdate = Date.now();
-  totalMsgCount++;
-  document.getElementById("status-msg-count").textContent =
-    `${totalMsgCount} upd`;
-
-  const seen = new Set();
-
-  for (const ac of data.aircraft) {
-    seen.add(ac.icao);
-    aircraft[ac.icao] = ac;
-    updateMarker(ac);
-  }
-
-  const inHistory = document.body.classList.contains("history-active");
-
-  // Remove aircraft that disappeared from the full snapshot (skip in history mode)
-  if (data.full && !inHistory) {
-    for (const icao of Object.keys(aircraft)) {
-      if (!seen.has(icao)) {
-        delete aircraft[icao];
-        removeMarker(icao);
-      }
-    }
-  }
-
-  // Remove aircraft older than TTL (skip in history mode)
-  if (!inHistory) {
-    for (const [icao, ac] of Object.entries(aircraft)) {
-      if (ac.age > aircraftTTL) {
-        delete aircraft[icao];
-        removeMarker(icao);
-      }
-    }
-  }
-
-  renderTable();
-  applyAutoView();
-
-  // Update selected detail if visible
-  if (selectedIcao && aircraft[selectedIcao]) {
-    renderDetail(aircraft[selectedIcao]);
-  }
-});
 
 // Refresh selected aircraft track every 30s so new points appear on the map
 setInterval(() => {
@@ -2627,7 +2661,7 @@ document.getElementById("settings-modal").addEventListener("show.bs.modal", () =
       };
       usrpGainOriginal = cfg.receiver?.usrp_gain ?? 40.0;
     });
-  socket.emit("spectrum_subscribe", true);
+  wsSend("spectrum_subscribe", true);
   refreshDbStats();
 });
 
@@ -2656,7 +2690,7 @@ document.getElementById("btn-db-reset").addEventListener("click", () => {
 });
 
 document.getElementById("settings-modal").addEventListener("hide.bs.modal", () => {
-  socket.emit("spectrum_subscribe", false);
+  wsSend("spectrum_subscribe", false);
   if (gainSaving) {
     // Save was confirmed — preview values become the new saved values.
     gainPreviewActive = false;
@@ -3389,7 +3423,7 @@ function restartApp() {
     badge.style.cursor = "";
     badge.title = "";
     // Restore live/offline state from socket
-    if (socket && socket.connected) {
+    if (wsConnected) {
       badge.className = "badge bg-success"; badge.textContent = "LIVE";
     } else {
       badge.className = "badge bg-danger"; badge.textContent = "OFFLINE";
@@ -3517,7 +3551,7 @@ function restartApp() {
         });
         histMarkers[icao] = L.marker(ll, {icon, title: icao}).addTo(histLayerGrp);
         histMarkers[icao].bindPopup("", { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
-        histMarkers[icao].on("mouseover", function () { this.openPopup(); });
+        histMarkers[icao].on("mouseover", function () { openPopupSmart(this); });
         histMarkers[icao].on("mouseout",  function () { this.closePopup(); });
       } else {
         histMarkers[icao].setLatLng(ll);

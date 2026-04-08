@@ -1,40 +1,42 @@
-import secrets
 import logging
-from flask import Flask
-from flask_socketio import SocketIO
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.templating import Jinja2Templates
 
 from aircraft.registry import AircraftRegistry
 from config import AppConfig
 
 log = logging.getLogger(__name__)
 
+_web_dir = Path(__file__).parent
+
 
 def create_app(config: AppConfig, registry: AircraftRegistry, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None):
-    app = Flask(
-        __name__,
-        template_folder="templates",
-        static_folder="static",
+    from .events import create_lifespan, setup_websocket
+
+    lifespan = create_lifespan(config, registry, receiver)
+
+    app = FastAPI(lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
-    app.config["SECRET_KEY"] = secrets.token_hex(16)
 
-    socketio = SocketIO(
-        app,
-        async_mode="threading",
-        cors_allowed_origins="*",
-        transports=["polling"],
-        logger=False,
-        engineio_logger=False,
-    )
-    # Suppress the spurious "WebSocket transport not available" error that
-    # Engine.IO emits on every connection.  WebSocket is intentionally disabled
-    # (transports=["polling"]) because Waitress is a pure-WSGI server and does
-    # not support the HTTP upgrade required for WebSocket.
-    logging.getLogger("engineio.server").setLevel(logging.CRITICAL)
+    templates = Jinja2Templates(directory=str(_web_dir / "templates"))
 
-    from .routes import register_routes
-    from .events import register_events
+    app.mount("/static", StaticFiles(directory=str(_web_dir / "static")), name="static")
 
-    register_routes(app, config, registry, tak_sender, receiver, server_manager, store, gpsd_client)
-    register_events(socketio, config, registry, receiver)
+    from .routes import create_router
+    router = create_router(config, registry, templates, tak_sender, receiver, server_manager, store, gpsd_client)
+    app.include_router(router)
 
-    return app, socketio
+    setup_websocket(app, config, registry, receiver)
+
+    return app

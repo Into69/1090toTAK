@@ -1,135 +1,173 @@
+import asyncio
 import logging
 import time
-import threading
-from flask import request
-from flask_socketio import SocketIO, emit
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from aircraft.registry import AircraftRegistry
 from config import AppConfig
 
 log = logging.getLogger(__name__)
 
-# Thread-safe client registry: sid → {addr, connected_at}
-_clients: dict = {}
-_clients_lock = threading.Lock()
-# SIDs that have the settings modal open and want spectrum data
-_spectrum_subs: set = set()
-_spectrum_lock = threading.Lock()
+# Client tracking — accessed only from the asyncio event loop, no locks needed.
+_clients: dict[str, dict] = {}   # id -> {ws, addr, connected_at}
+_spectrum_subs: set[str] = set()
 
 
 def web_client_status() -> dict:
     """Return current web client count and list for /api/stats."""
     now = time.time()
-    with _clients_lock:
-        client_list = [
-            {
-                "addr": info["addr"],
-                "connected_for": int(now - info["connected_at"]),
-            }
-            for info in _clients.values()
-        ]
+    client_list = [
+        {
+            "addr": info["addr"],
+            "connected_for": int(now - info["connected_at"]),
+        }
+        for info in _clients.values()
+    ]
     return {"clients": len(client_list), "client_list": client_list}
 
 
-def register_events(socketio: SocketIO, config: AppConfig, registry: AircraftRegistry, receiver=None):
+async def _broadcast(msg: dict):
+    """Send a JSON message to every connected WebSocket client."""
+    dead: list[str] = []
+    for cid, info in _clients.items():
+        ws: WebSocket = info["ws"]
+        try:
+            if ws.client_state == WebSocketState.CONNECTED:
+                await ws.send_json(msg)
+        except Exception:
+            dead.append(cid)
+    for cid in dead:
+        _clients.pop(cid, None)
+        _spectrum_subs.discard(cid)
 
-    @socketio.on("connect")
-    def on_connect():
-        addr = request.remote_addr or "?"
-        sid = request.sid
-        with _clients_lock:
-            _clients[sid] = {"addr": addr, "connected_at": time.time(), "last_seen": time.time()}
-        log.debug("Web client connected: %s (%s)", sid, addr)
-        # Send full snapshot immediately
-        emit("aircraft_update", {
-            "aircraft": registry.get_all_dicts(),
-            "full": True,
-        })
 
-    @socketio.on("disconnect")
-    def on_disconnect():
-        sid = request.sid
-        with _clients_lock:
-            _clients.pop(sid, None)
-        with _spectrum_lock:
-            _spectrum_subs.discard(sid)
-        log.debug("Web client disconnected: %s", sid)
+async def _broadcast_loop(registry: AircraftRegistry):
+    prev_icaos: set = set()
+    while True:
+        await asyncio.sleep(1.0)
+        try:
+            aircraft = registry.get_all_dicts()
+            curr_icaos = {ac["icao"] for ac in aircraft}
+            await _broadcast({
+                "type": "aircraft_update",
+                "data": {"aircraft": aircraft, "full": True},
+            })
+            for icao in prev_icaos - curr_icaos:
+                try:
+                    await _broadcast({"type": "aircraft_remove", "data": {"icao": icao}})
+                except Exception:
+                    pass
+            prev_icaos = curr_icaos
+        except Exception as e:
+            log.warning("Broadcast error: %s", e)
 
-    @socketio.on("spectrum_subscribe")
-    def on_spectrum_subscribe(active):
-        sid = request.sid
-        with _spectrum_lock:
-            if active:
-                _spectrum_subs.add(sid)
-            else:
-                _spectrum_subs.discard(sid)
 
-    @socketio.on("request_config")
-    def on_request_config():
-        from config import config_to_dict
-        emit("config_update", config_to_dict(config))
-
-    def _broadcast_loop():
-        import time
-        _prev_icaos: set = set()
-        while True:
-            time.sleep(1.0)
-            try:
-                aircraft = registry.get_all_dicts()
-                curr_icaos = {ac["icao"] for ac in aircraft}
-                socketio.emit("aircraft_update", {
-                    "aircraft": aircraft,
-                    "full": True,
-                })
-                # Emit explicit remove events for aircraft that just disappeared
-                for icao in _prev_icaos - curr_icaos:
-                    try:
-                        socketio.emit("aircraft_remove", {"icao": icao})
-                    except Exception:
-                        pass
-                _prev_icaos = curr_icaos
-            except Exception as e:
-                log.warning("Broadcast error: %s", e)
-
-    socketio.start_background_task(_broadcast_loop)
-
-    def _spectrum_loop():
-        import time
-        while True:
-            try:
-                time.sleep(0.5)
-                with _spectrum_lock:
-                    has_subs = bool(_spectrum_subs)
-                if not has_subs:
-                    continue
-                spec = None
-                if receiver is not None:
-                    r = getattr(receiver, "_receiver", receiver)
-                    spec = getattr(r, "spectrum", None)
-                if spec:
-                    socketio.emit("spectrum_update", {
+async def _spectrum_loop(receiver):
+    while True:
+        try:
+            await asyncio.sleep(0.5)
+            if not _spectrum_subs:
+                continue
+            spec = None
+            if receiver is not None:
+                r = getattr(receiver, "_receiver", receiver)
+                spec = getattr(r, "spectrum", None)
+            if spec:
+                msg = {
+                    "type": "spectrum_update",
+                    "data": {
                         "bins": [round(v, 1) for v in spec],
                         "center_freq": 1_090_000_000,
                         "sample_rate": 2_000_000,
-                    })
-            except Exception as e:
-                log.warning("Spectrum loop error: %s", e)
+                    },
+                }
+                # Send only to spectrum subscribers
+                dead: list[str] = []
+                for cid in list(_spectrum_subs):
+                    info = _clients.get(cid)
+                    if not info:
+                        dead.append(cid)
+                        continue
+                    ws: WebSocket = info["ws"]
+                    try:
+                        if ws.client_state == WebSocketState.CONNECTED:
+                            await ws.send_json(msg)
+                    except Exception:
+                        dead.append(cid)
+                for cid in dead:
+                    _clients.pop(cid, None)
+                    _spectrum_subs.discard(cid)
+        except Exception as e:
+            log.warning("Spectrum loop error: %s", e)
 
-    socketio.start_background_task(_spectrum_loop)
 
-    def _signal_quality_loop():
-        import time
-        while True:
-            time.sleep(2.0)
-            try:
-                sq = None
-                if receiver is not None:
-                    r = getattr(receiver, "_receiver", receiver)
-                    sq = getattr(r, "signal_quality", None)
-                socketio.emit("signal_quality_update",
-                              sq if sq else {"status": "none"})
-            except Exception as e:
-                log.warning("Signal quality loop error: %s", e)
+async def _signal_quality_loop(receiver):
+    while True:
+        await asyncio.sleep(2.0)
+        try:
+            sq = None
+            if receiver is not None:
+                r = getattr(receiver, "_receiver", receiver)
+                sq = getattr(r, "signal_quality", None)
+            await _broadcast({
+                "type": "signal_quality_update",
+                "data": sq if sq else {"status": "none"},
+            })
+        except Exception as e:
+            log.warning("Signal quality loop error: %s", e)
 
-    socketio.start_background_task(_signal_quality_loop)
 
+def create_lifespan(config: AppConfig, registry: AircraftRegistry, receiver=None):
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        tasks = [
+            asyncio.create_task(_broadcast_loop(registry)),
+            asyncio.create_task(_spectrum_loop(receiver)),
+            asyncio.create_task(_signal_quality_loop(receiver)),
+        ]
+        yield
+        for t in tasks:
+            t.cancel()
+    return lifespan
+
+
+def setup_websocket(app: FastAPI, config: AppConfig, registry: AircraftRegistry, receiver=None):
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(ws: WebSocket):
+        await ws.accept()
+        client_id = str(id(ws))
+        addr = ws.client.host if ws.client else "?"
+        _clients[client_id] = {"ws": ws, "addr": addr, "connected_at": time.time()}
+        log.debug("Web client connected: %s (%s)", client_id, addr)
+
+        # Send full snapshot immediately
+        try:
+            await ws.send_json({
+                "type": "aircraft_update",
+                "data": {"aircraft": registry.get_all_dicts(), "full": True},
+            })
+        except Exception:
+            _clients.pop(client_id, None)
+            return
+
+        try:
+            while True:
+                raw = await ws.receive_json()
+                msg_type = raw.get("type")
+                if msg_type == "spectrum_subscribe":
+                    if raw.get("data"):
+                        _spectrum_subs.add(client_id)
+                    else:
+                        _spectrum_subs.discard(client_id)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        finally:
+            _clients.pop(client_id, None)
+            _spectrum_subs.discard(client_id)
+            log.debug("Web client disconnected: %s", client_id)
