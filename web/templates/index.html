@@ -294,7 +294,8 @@
     .hist-row + .hist-row { margin-top: 5px; }
     .hist-sep { color: #556; }
     .hist-dt  { width: 160px !important; font-size: 0.72rem !important;
-                background: #0d0f11; border-color: #2c2f33; color: #cdd0d5; }
+                background: rgba(20,22,24,0.93); border-color: #2c2f33; color: #cdd0d5;
+                color-scheme: dark; }
     .hist-dt:focus { border-color: #4e8fd6; box-shadow: none; }
     #hist-status  { font-size: 0.72rem; color: #8899aa; }
     #hist-time-lbl{ font-size: 0.72rem; color: #cdd0d5; white-space: nowrap; min-width: 130px; }
@@ -399,8 +400,8 @@
     /* Range ring labels */
     .range-ring-label { background: none !important; border: none !important; }
     .range-ring-label span {
-      font-size: 0.6rem; color: #4e8fd6;
-      background: rgba(13,15,17,0.75); padding: 1px 4px; border-radius: 3px;
+      font-size: 0.65rem; color: #6ab0f0; font-weight: 600;
+      background: rgba(13,15,17,0.85); padding: 1px 5px; border-radius: 3px;
       white-space: nowrap;
     }
 
@@ -1605,19 +1606,37 @@ function iconKeyForAc(ac) {
   return iconType;
 }
 
+const CATEGORY_COT_MAP = {
+  "A1": "a-f-A-M-F-Q",     // Light fixed wing
+  "A2": "a-f-A-M-F-Q",     // Small fixed wing
+  "A3": "a-f-A-M-F-Q",     // Large fixed wing
+  "A4": "a-f-A-M-F-Q-H",   // High vortex large
+  "A5": "a-f-A-M-F-Q-H",   // Heavy (> 300k lbs)
+  "A6": "a-f-A-M-F-Q-J",   // High performance / fighter
+  "A7": "a-f-A-M-H",       // Rotorcraft
+  "B1": "a-f-A-M-F-Q",     // Glider / sailplane
+  "B2": "a-f-A-M-F-L",     // Lighter-than-air
+  "B4": "a-f-A-M-F-Q",     // Ultralight
+  "B6": "a-f-A-M-F-U",     // UAV / drone
+  "B7": "a-f-A-M-F-U",     // Space / trans-atmospheric
+  "C1": "a-f-G-E-V",       // Emergency vehicle
+  "C2": "a-f-G-E-V",       // Service vehicle
+};
 function cotTypeForAc(ac) {
   if (ac.squawk && EMERGENCY_SQUAWKS.includes(ac.squawk)) return "a-u-A";
   const cat = (ac.category || "").toUpperCase();
-  if (cat === "A7") return "a-f-A-M-H";                  // Rotorcraft
-  if (cat === "B6" || cat === "B7") return "a-f-A-M-F-U"; // UAV / space
-  return "a-f-A-M-F-Q";                                   // Default fixed-wing
+  return CATEGORY_COT_MAP[cat] || "a-f-A-M-F-Q";
 }
 
 const COT_TO_SIDC = {
-  "a-f-A-M-F-Q": "SFAPMFQ--------",  // friendly fixed-wing
-  "a-f-A-M-H":   "SFAPMH---------",  // friendly rotorcraft
-  "a-f-A-M-F-U": "SFAPMFU--------",  // friendly UAV
-  "a-u-A":       "SUAP-----------",  // unknown air
+  "a-f-A-M-F-Q":   "SFAPMFQ--------",  // friendly fixed-wing
+  "a-f-A-M-F-Q-H": "SFAPMFQH-------",  // heavy fixed-wing
+  "a-f-A-M-F-Q-J": "SFAPMFQJ-------",  // fighter / high perf
+  "a-f-A-M-H":     "SFAPMH---------",  // friendly rotorcraft
+  "a-f-A-M-F-U":   "SFAPMFU--------",  // friendly UAV
+  "a-f-A-M-F-L":   "SFAPMFL--------",  // lighter-than-air
+  "a-f-G-E-V":     "SFGPEV---------",  // ground vehicle
+  "a-u-A":         "SUAP-----------",  // unknown air
 };
 
 function makeMilsymbolIcon(ac) {
@@ -3229,8 +3248,8 @@ function drawRangeRings() {
   const NM = 1852;
   for (const nm of rangeRingsNm) {
     L.circle([sensorLat, sensorLon], {
-      radius: nm * NM, color: "#4e8fd6", weight: 1,
-      fillOpacity: 0, opacity: 0.35, dashArray: "6,4", interactive: false,
+      radius: nm * NM, color: "#4e8fd6", weight: 1.5,
+      fillOpacity: 0, opacity: 0.6, dashArray: "8,5", interactive: false,
     }).addTo(rangeRingsLayer);
     const labelLat = sensorLat + (nm * NM) / 111320;
     L.marker([labelLat, sensorLon], {
@@ -3495,8 +3514,10 @@ document.getElementById("stats-modal").addEventListener("show.bs.modal", () => {
     const catMax = Math.max(...d.category_breakdown.map(c => c.count), 1);
     catDiv.innerHTML = d.category_breakdown.slice(0, 10).map(c => {
       const pct = (c.count / catMax * 100).toFixed(1);
+      const catName = CATEGORY_NAMES[(c.category||"").toUpperCase()] || "";
+      const label = catName ? `${c.category} (${catName})` : (c.category || "?");
       return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
-        <span style="width:55px;font-size:0.7rem;color:#8899aa;text-align:right;">${c.category}</span>
+        <span style="width:110px;font-size:0.7rem;color:#8899aa;text-align:right;white-space:nowrap;">${label}</span>
         <div style="flex:1;background:#1f2226;border-radius:3px;height:14px;">
           <div style="width:${pct}%;background:#5bc0eb;height:100%;border-radius:3px;min-width:${c.count?2:0}px;"></div>
         </div>

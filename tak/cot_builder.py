@@ -29,29 +29,43 @@ def _kts_to_ms(knots: Optional[float]) -> float:
     return round(knots * 0.514444, 2)
 
 
-# CoT type codes for aircraft
-# a-f-A = assumed friendly air
-# a-u-A = unknown air
-# a-h-A = hostile air (not used here)
-COT_TYPE_AIR_FRIENDLY    = "a-f-A-M-F-Q"  # fixed wing commercial
-COT_TYPE_AIR_UNKNOWN     = "a-u-A"
-COT_TYPE_ROTORCRAFT      = "a-f-A-M-H"
-COT_TYPE_UAV             = "a-f-A-M-F-U"
+# CoT type codes — MIL-STD-2525 symbology
+COT_FIXED_WING      = "a-f-A-M-F-Q"   # friendly fixed wing
+COT_FIXED_WING_LG   = "a-f-A-M-F-Q-H" # heavy fixed wing (> 300k lbs)
+COT_HIGH_PERF        = "a-f-A-M-F-Q-J" # high-performance / fighter
+COT_ROTORCRAFT       = "a-f-A-M-H"     # rotorcraft
+COT_UAV              = "a-f-A-M-F-U"   # UAV / drone
+COT_LIGHTER_THAN_AIR = "a-f-A-M-F-L"   # balloon / airship
+COT_GROUND_VEHICLE   = "a-f-G-E-V"     # ground vehicle
+COT_AIR_UNKNOWN      = "a-u-A"         # unknown air
 
 # Emergency squawk codes
 EMERGENCY_SQUAWKS = {"7500", "7600", "7700"}
 
+# ADS-B emitter category → CoT type
+_CATEGORY_COT_MAP = {
+    "A1": COT_FIXED_WING,        # Light (< 15,500 lbs)
+    "A2": COT_FIXED_WING,        # Small (15,500–75,000 lbs)
+    "A3": COT_FIXED_WING,        # Large (75,000–300,000 lbs)
+    "A4": COT_FIXED_WING_LG,     # High vortex large
+    "A5": COT_FIXED_WING_LG,     # Heavy (> 300,000 lbs)
+    "A6": COT_HIGH_PERF,         # High performance (> 5g, > 400 kts)
+    "A7": COT_ROTORCRAFT,        # Rotorcraft
+    "B1": COT_FIXED_WING,        # Glider / sailplane
+    "B2": COT_LIGHTER_THAN_AIR,  # Lighter-than-air
+    "B4": COT_FIXED_WING,        # Ultralight / hang-glider / paraglider
+    "B6": COT_UAV,               # UAV / drone
+    "B7": COT_UAV,               # Space / trans-atmospheric
+    "C1": COT_GROUND_VEHICLE,    # Emergency vehicle
+    "C2": COT_GROUND_VEHICLE,    # Service vehicle
+}
+
 
 def _cot_type(aircraft: Aircraft) -> str:
     if aircraft.squawk in EMERGENCY_SQUAWKS:
-        return "a-u-A"
-    cat = aircraft.category or ""
-    # ADS-B emitter category codes: "A7" = rotorcraft, "B6" = UAV/drone
-    if cat == "A7":
-        return COT_TYPE_ROTORCRAFT
-    if cat in ("B6", "B7"):
-        return COT_TYPE_UAV
-    return COT_TYPE_AIR_FRIENDLY
+        return COT_AIR_UNKNOWN
+    cat = (aircraft.category or "").upper()
+    return _CATEGORY_COT_MAP.get(cat, COT_FIXED_WING)
 
 
 class CotBuilder:

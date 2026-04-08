@@ -116,7 +116,7 @@ class AircraftStore:
         Decimated to at most one point per `step` seconds per aircraft."""
         with self._lock:
             rows = self._conn.execute(
-                """SELECT icao, callsign, lat, lon, altitude, ground_speed, track, on_ground, ts
+                """SELECT icao, callsign, lat, lon, altitude, ground_speed, track, on_ground, category, ts
                    FROM positions WHERE ts >= ? AND ts < ?
                    ORDER BY icao, ts ASC""",
                 (start, end),
