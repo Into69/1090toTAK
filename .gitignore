@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
+.gitignore
 
 # Runtime data
 config.json
