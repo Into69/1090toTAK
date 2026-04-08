@@ -406,11 +406,14 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
 
     @app.route("/api/update/check")
     def update_check():
-        from .updater import check_for_updates, get_state
-        host = config.update.host
-        if not host:
-            return jsonify({"available": False, "reason": "no update server configured"})
-        changed = check_for_updates(host, config.update.port)
+        from .updater import check_for_updates, check_for_updates_github, get_state
+        if config.update.source == "github":
+            changed = check_for_updates_github()
+        else:
+            host = config.update.host
+            if not host:
+                return jsonify({"available": False, "reason": "no update server configured"})
+            changed = check_for_updates(host, config.update.port)
         if changed is None:
             s = get_state()
             return jsonify({"available": False, "error": s.get("error"), **s})
@@ -421,11 +424,12 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
         import os as _os
         import urllib.request as _urlreq
         import urllib.parse as _urlparse
-        from .updater import safe_abs_path, _fmt_error
+        from .updater import safe_abs_path, _fmt_error, GITHUB_REPO, GITHUB_BRANCH
         host = config.update.host
-        if not host:
-            return jsonify({"ok": False, "error": "no update server configured"})
         port = config.update.port
+        is_github = config.update.source == "github"
+        if not is_github and not host:
+            return jsonify({"ok": False, "error": "no update server configured"})
         data = request.get_json(force=True) or {}
         files_to_pull = data.get("files", [])
         results = []
@@ -435,7 +439,10 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
             except ValueError as e:
                 results.append({"path": path, "ok": False, "error": str(e)})
                 continue
-            url = f"http://{host}:{port}/api/update/file?{_urlparse.urlencode({'path': path})}"
+            if is_github:
+                url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{_urlparse.quote(path, safe='/')}"
+            else:
+                url = f"http://{host}:{port}/api/update/file?{_urlparse.urlencode({'path': path})}"
             try:
                 with _urlreq.urlopen(url, timeout=10) as resp:
                     content = resp.read()
@@ -447,7 +454,6 @@ def register_routes(app, config: AppConfig, registry: AircraftRegistry, tak_send
                 results.append({"path": path, "ok": True})
             except Exception as e:
                 results.append({"path": path, "ok": False, "error": _fmt_error(e, url)})
-        return jsonify({"ok": all(r["ok"] for r in results), "results": results})
         return jsonify({"ok": all(r["ok"] for r in results), "results": results})
 
     @app.route("/api/restart", methods=["POST"])

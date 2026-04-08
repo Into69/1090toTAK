@@ -1,6 +1,6 @@
 """
 Peer update helper — compare local .py/.html files against a remote
-1090toTAK instance and download changed files.
+1090toTAK instance (or GitHub) and download changed files.
 """
 import hashlib
 import os
@@ -12,6 +12,9 @@ log = logging.getLogger(__name__)
 
 _APP_DIR = os.path.normpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _SKIP_DIRS = {"__pycache__", "venv", "env", ".git", "node_modules", ".claude", "tiles_cache"}
+
+GITHUB_REPO = "Into69/1090toTAK"
+GITHUB_BRANCH = "main"
 
 # Shared state (read by /api/stats, written by check_for_updates)
 _state: dict = {
@@ -45,6 +48,22 @@ def local_manifest() -> dict:
     for rel, abs_path in app_files():
         with open(abs_path, "rb") as f:
             out[rel] = hashlib.sha256(f.read()).hexdigest()
+    return out
+
+
+def git_blob_sha1(abs_path: str) -> str:
+    """Compute the git blob SHA-1 for a file (same hash git uses internally)."""
+    with open(abs_path, "rb") as f:
+        data = f.read()
+    blob = b"blob %d\0" % len(data) + data
+    return hashlib.sha1(blob).hexdigest()
+
+
+def local_manifest_git() -> dict:
+    """Return {rel_path: git_blob_sha1} for all local app files."""
+    out = {}
+    for rel, abs_path in app_files():
+        out[rel] = git_blob_sha1(abs_path)
     return out
 
 
@@ -127,6 +146,69 @@ def check_for_updates(host: str, port: int):
             _state["checking"] = False
         log.warning("Update check failed: %s", msg)
         return None
+
+
+def check_for_updates_github():
+    """
+    Fetch the GitHub repo tree, compare git blob SHAs with local files.
+    Returns list of changed dicts or None on error.
+    """
+    import urllib.request
+    import json as _json
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/{GITHUB_BRANCH}?recursive=1"
+
+    with _state_lock:
+        _state["checking"] = True
+
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            tree_data = _json.loads(resp.read().decode())
+
+        remote_files = {}
+        for item in tree_data.get("tree", []):
+            if item.get("type") != "blob":
+                continue
+            p = item["path"]
+            if p.endswith(".py") or p.endswith(".html"):
+                remote_files[p] = item["sha"]
+
+        local = local_manifest_git()
+        changed = []
+        for p, remote_sha in remote_files.items():
+            local_sha = local.get(p)
+            if local_sha != remote_sha:
+                changed.append({
+                    "path": p,
+                    "status": "modified" if p in local else "new",
+                })
+
+        with _state_lock:
+            _state["available"] = bool(changed)
+            _state["files"] = changed
+            _state["last_check"] = time.time()
+            _state["error"] = None
+            _state["checking"] = False
+
+        return changed
+
+    except Exception as e:
+        msg = _fmt_error(e, url)
+        with _state_lock:
+            _state["error"] = msg
+            _state["checking"] = False
+        log.warning("GitHub update check failed: %s", msg)
+        return None
+
+
+def download_file_github(rel_path: str) -> bytes:
+    """Download a single file from the GitHub repo and return raw bytes."""
+    import urllib.request
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{rel_path}"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read()
 
 
 def get_state() -> dict:

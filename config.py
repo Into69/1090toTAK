@@ -80,6 +80,7 @@ class ServersConfig:
 
 @dataclass
 class UpdateConfig:
+    source: str = "custom"   # "custom" | "github"
     host: str = ""
     port: int = 8080
 

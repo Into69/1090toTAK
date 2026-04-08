@@ -1090,6 +1090,18 @@
                   </div>
                   <div class="card-body py-2">
                     <div class="row g-2 align-items-end mb-2">
+                      <div class="col-12">
+                        <label class="form-label mb-1" style="font-size:0.8rem;">Update Source</label>
+                        <select class="form-select form-select-sm" id="cfg-update-source" onchange="toggleUpdateSource()">
+                          <option value="github">GitHub</option>
+                          <option value="custom">Custom (Peer)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div id="update-github-info" class="mb-2" style="display:none;">
+                      <small class="text-muted"><i class="bi bi-github me-1"></i>github.com/Into69/1090toTAK (main branch)</small>
+                    </div>
+                    <div class="row g-2 align-items-end mb-2" id="update-custom-fields">
                       <div class="col">
                         <label class="form-label mb-1" style="font-size:0.8rem;">Update Server Host</label>
                         <input type="text" class="form-control form-control-sm" id="cfg-update-host" placeholder="e.g. 192.168.1.10"/>
@@ -2335,8 +2347,10 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-sbs-server-port").value      = cfg.servers?.sbs_port || 30003;
   document.getElementById("cfg-avr-server-enabled").checked = cfg.servers?.avr_enabled || false;
   document.getElementById("cfg-avr-server-port").value      = cfg.servers?.avr_port || 30002;
+  document.getElementById("cfg-update-source").value = cfg.update?.source || "custom";
   document.getElementById("cfg-update-host").value = cfg.update?.host || "";
   document.getElementById("cfg-update-port").value = cfg.update?.port || 8080;
+  toggleUpdateSource();
 
   updateReceiverFields();
   updateTileSelection(cfg.web?.map_type || "osm");
@@ -2717,6 +2731,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       avr_port:    parseInt(document.getElementById("cfg-avr-server-port").value),
     },
     update: {
+      source: document.getElementById("cfg-update-source").value,
       host: document.getElementById("cfg-update-host").value.trim(),
       port: parseInt(document.getElementById("cfg-update-port").value) || 8080,
     },
@@ -2951,7 +2966,7 @@ let sensorMarker = null;
 
 const houseIcon = L.divIcon({
   className: "",
-  html: '<i class="bi bi-house-fill" style="font-size:1.4rem;color:#4e8fd6;text-shadow:0 0 4px #000;"></i>',
+  html: '<i class="bi bi-house-fill" style="font-size:1.4rem;color:#888888;text-shadow:0 0 4px #000;"></i>',
   iconSize: [22, 22],
   iconAnchor: [11, 20],
   popupAnchor: [0, -22],
@@ -3128,7 +3143,8 @@ function _applyUpdateState(state) {
     const ttHeader = `<div class="tt-header">${_updateFiles.length} file${_updateFiles.length !== 1 ? "s" : ""} to update</div>`;
     const ttRows   = _updateFiles.map(p => `<div class="tt-row"><span class="tt-addr">${p}</span></div>`).join("");
     badge.dataset.tooltip = ttHeader + ttRows;
-    if (statusText) statusText.textContent = `${_updateFiles.length} file(s) ready to update from JSON API server`;
+    const srcLabel = (document.getElementById("cfg-update-source")?.value === "github") ? "GitHub" : "update server";
+    if (statusText) statusText.textContent = `${_updateFiles.length} file(s) ready to update from ${srcLabel}`;
     if (btnPull)    btnPull.style.display    = "";
     if (btnRestart) btnRestart.style.display = "none";
   } else {
@@ -3143,13 +3159,27 @@ function _applyUpdateState(state) {
   }
 }
 
+function toggleUpdateSource() {
+  const source = document.getElementById("cfg-update-source").value;
+  const customFields = document.getElementById("update-custom-fields");
+  const githubInfo   = document.getElementById("update-github-info");
+  if (source === "github") {
+    if (customFields) customFields.style.display = "none";
+    if (githubInfo)   githubInfo.style.display = "";
+  } else {
+    if (customFields) customFields.style.display = "";
+    if (githubInfo)   githubInfo.style.display = "none";
+  }
+}
+
 function checkForUpdates() {
   _updateApplied = false;
   const badge      = document.getElementById("update-badge");
   const statusText = document.getElementById("update-status-text");
+  const source = document.getElementById("cfg-update-source")?.value || "custom";
   const host = (document.getElementById("cfg-update-host")?.value || "").trim();
   const port = parseInt(document.getElementById("cfg-update-port")?.value) || 8080;
-  if (!host) {
+  if (source === "custom" && !host) {
     if (badge)      { badge.className = "badge bg-secondary"; badge.textContent = "—"; }
     if (statusText) statusText.textContent = "Enter an update server host to check for updates.";
     return;
@@ -3158,11 +3188,11 @@ function checkForUpdates() {
   const _btnPull = document.getElementById("btn-update-pull");
   if (_btnPull)   _btnPull.style.display = "none";
   if (statusText) statusText.textContent = "Checking for updates\u2026";
-  // Persist host/port first so the backend knows where to pull from
+  // Persist source/host/port first so the backend knows where to pull from
   fetch("/api/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({update: {host, port}}),
+    body: JSON.stringify({update: {source, host, port}}),
   })
     .then(() => fetch("/api/update/check"))
     .then(r => r.json())
@@ -3197,7 +3227,8 @@ function pullUpdate() {
 
   if (badge)      { badge.className = "badge bg-warning text-dark"; badge.textContent = "Updating…"; }
   if (statusText) statusText.textContent = `Updating ${_updateFiles.length} file(s)…`;
-  logLine(`Pulling ${_updateFiles.length} file(s) from JSON API server…`);
+  const pullSrcLabel = (document.getElementById("cfg-update-source")?.value === "github") ? "GitHub" : "update server";
+  logLine(`Pulling ${_updateFiles.length} file(s) from ${pullSrcLabel}…`);
 
   const files = [..._updateFiles];
   let idx = 0, errors = 0;
