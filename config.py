@@ -68,6 +68,8 @@ class WebConfig:
     auto_view: bool = False
     zoom_adjust: int = 0
     icon_type: str = "arrow"  # "arrow" | "plane" | "heli" | "dot" | "milsymbol"
+    range_rings: bool = False
+    range_rings_nm: str = "25,50,100,150,200"
 
 
 @dataclass
@@ -100,6 +102,15 @@ class LocationConfig:
 
 
 @dataclass
+class AlertConfig:
+    enabled: bool = True
+    browser_notifications: bool = False
+    auto_select: bool = False
+    emergency_squawks: bool = True
+    rules: list = field(default_factory=list)  # [{name, type, value, enabled}]
+
+
+@dataclass
 class AppConfig:
     receiver: ReceiverConfig = field(default_factory=ReceiverConfig)
     tak: TAKConfig = field(default_factory=TAKConfig)
@@ -107,6 +118,8 @@ class AppConfig:
     servers: ServersConfig = field(default_factory=ServersConfig)
     update: UpdateConfig = field(default_factory=UpdateConfig)
     location: LocationConfig = field(default_factory=LocationConfig)
+    alerts: AlertConfig = field(default_factory=AlertConfig)
+    receivers: list = field(default_factory=list)  # [{id, label, enabled, type, host, ...}]
     aircraft_ttl: int = 60
     history_ttl: int = 86400
 
@@ -146,6 +159,8 @@ def load_config() -> AppConfig:
         servers=ServersConfig(**_filter_fields(ServersConfig, merged["servers"])),
         update=UpdateConfig(**_filter_fields(UpdateConfig, merged.get("update", {}))),
         location=LocationConfig(**_filter_fields(LocationConfig, merged.get("location", {}))),
+        alerts=AlertConfig(**_filter_fields(AlertConfig, merged.get("alerts", {}))),
+        receivers=merged.get("receivers", []),
         aircraft_ttl=merged["aircraft_ttl"],
         history_ttl=merged["history_ttl"],
     )
@@ -194,7 +209,14 @@ def update_config_from_dict(cfg: AppConfig, data: dict) -> None:
         for k, v in loc.items():
             if hasattr(cfg.location, k):
                 setattr(cfg.location, k, v)
+    if "alerts" in data:
+        a = data["alerts"]
+        for k, v in a.items():
+            if hasattr(cfg.alerts, k):
+                setattr(cfg.alerts, k, v)
     if "aircraft_ttl" in data:
         cfg.aircraft_ttl = int(data["aircraft_ttl"])
     if "history_ttl" in data:
         cfg.history_ttl = int(data["history_ttl"])
+    if "receivers" in data:
+        cfg.receivers = data["receivers"]

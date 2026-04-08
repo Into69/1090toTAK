@@ -52,6 +52,12 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
     def get_aircraft():
         return registry.get_all_dicts()
 
+    @router.get("/api/receivers")
+    def get_receivers():
+        if hasattr(receiver, '_receivers'):
+            return [{"id": k, **v.status()} for k, v in receiver._receivers.items()]
+        return [{"id": "default", **receiver.status()}]
+
     @router.get("/data/aircraft.json")
     def dump1090_aircraft_json():
         """dump1090-compatible aircraft.json endpoint."""
@@ -160,6 +166,11 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
                 else:
                     receiver.reconnect()
                     log.info("Receiver config changed — reconnecting")
+            if receiver and "receivers" in data:
+                receiver.restart()
+                log.info("Multi-receiver config changed — restarting all")
+                if server_manager:
+                    server_manager.apply()
             if server_manager and "servers" in data:
                 server_manager.apply()
                 log.info("Server config changed — applied")
@@ -282,12 +293,6 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         ok = r.revert_gain_preview()
         return {"ok": ok}
 
-    @router.get("/api/history/{icao}")
-    def get_history(icao: str):
-        if store is None:
-            return []
-        return store.get_track(icao.upper())
-
     @router.get("/api/history/range")
     def history_range(end: float = Query(None), start: float = Query(None), step: int = Query(30)):
         import time as _t
@@ -303,6 +308,12 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         data  = store.get_range(start, end, step)
         count = sum(len(v) for v in data.values())
         return {"aircraft": data, "start": start, "end": end, "count": count}
+
+    @router.get("/api/history/{icao}")
+    def get_history(icao: str):
+        if store is None:
+            return []
+        return store.get_track(icao.upper())
 
     @router.get("/api/heatmap")
     def get_heatmap(end: float = Query(None), start: float = Query(None)):
@@ -330,6 +341,21 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             return {"cleared": 0}
         count = store.clear()
         return {"cleared": count}
+
+    @router.get("/api/store/dashboard")
+    def store_dashboard():
+        if store is None:
+            return {"error": "store not available"}
+        return {
+            "unique_all_time": store.unique_aircraft_count(),
+            "unique_today": store.unique_aircraft_today(),
+            "peak_concurrent": registry.peak_count,
+            "current_count": registry.count(),
+            "top_aircraft": store.top_aircraft(10),
+            "hourly_histogram": store.hourly_histogram(),
+            "altitude_distribution": store.altitude_distribution(),
+            "category_breakdown": store.category_breakdown(),
+        }
 
     @router.get("/api/location")
     def get_location():

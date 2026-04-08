@@ -18,6 +18,7 @@ class AircraftRegistry:
         self._aircraft: Dict[str, Aircraft] = {}
         self._lock = threading.RLock()
         self._ttl = ttl
+        self._peak_count = 0
         self._expiry_thread: Optional[threading.Thread] = None
         self._remove_callbacks: List[Callable] = []
         self._update_callbacks: List[Callable] = []
@@ -58,6 +59,7 @@ class AircraftRegistry:
                             fields.pop("lon", None)
 
             ac.update(**fields)
+            self._peak_count = max(self._peak_count, len(self._aircraft))
         for cb in self._update_callbacks:
             try:
                 cb(ac)
@@ -84,6 +86,10 @@ class AircraftRegistry:
     def count_with_position(self) -> int:
         with self._lock:
             return sum(1 for ac in self._aircraft.values() if ac.has_position())
+
+    @property
+    def peak_count(self) -> int:
+        return self._peak_count
 
     def on_remove(self, callback: Callable[[str], None]) -> None:
         self._remove_callbacks.append(callback)

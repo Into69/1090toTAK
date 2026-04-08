@@ -47,6 +47,12 @@ class AircraftStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_icao_ts ON positions (icao, ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ts       ON positions (ts)")
         conn.commit()
+        # Schema migration: add category column if missing
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)").fetchall()}
+        if "category" not in cols:
+            conn.execute("ALTER TABLE positions ADD COLUMN category TEXT")
+            conn.commit()
+            log.info("AircraftStore: migrated schema — added 'category' column")
         log.info("AircraftStore: opened %s (history_ttl=%ds)", self._db_path, self._history_ttl)
         return conn
 
@@ -70,8 +76,8 @@ class AircraftStore:
             try:
                 self._conn.execute(
                     """INSERT INTO positions
-                       (icao, callsign, lat, lon, altitude, ground_speed, track, on_ground, ts)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                       (icao, callsign, lat, lon, altitude, ground_speed, track, on_ground, category, ts)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (
                         icao,
                         ac.callsign,
@@ -81,6 +87,7 @@ class AircraftStore:
                         ac.ground_speed,
                         ac.track,
                         1 if ac.on_ground else 0,
+                        getattr(ac, "category", None),
                         now,
                     ),
                 )
@@ -146,6 +153,72 @@ class AircraftStore:
         return [[lat, lon, count / max_count] for (lat, lon), count in cells.items()]
 
     # ------------------------------------------------------------------
+    # Dashboard statistics
+    # ------------------------------------------------------------------
+
+    def unique_aircraft_count(self) -> int:
+        with self._lock:
+            return self._conn.execute("SELECT COUNT(DISTINCT icao) FROM positions").fetchone()[0]
+
+    def unique_aircraft_today(self) -> int:
+        import datetime
+        midnight = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(DISTINCT icao) FROM positions WHERE ts >= ?", (midnight,)
+            ).fetchone()[0]
+
+    def top_aircraft(self, limit: int = 10) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT icao, MAX(callsign) as callsign, COUNT(*) as cnt
+                   FROM positions GROUP BY icao ORDER BY cnt DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [{"icao": r["icao"], "callsign": r["callsign"], "count": r["cnt"]} for r in rows]
+
+    def hourly_histogram(self) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT CAST(ts / 3600 AS INTEGER) as bucket,
+                          COUNT(DISTINCT icao) as count
+                   FROM positions GROUP BY bucket ORDER BY bucket"""
+            ).fetchall()
+        import datetime
+        result = []
+        for r in rows:
+            hour_ts = r["bucket"] * 3600
+            label = datetime.datetime.fromtimestamp(hour_ts).strftime("%m/%d %H:%M")
+            result.append({"label": label, "count": r["count"]})
+        return result
+
+    def altitude_distribution(self) -> list:
+        with self._lock:
+            rows = self._conn.execute("""
+                SELECT
+                  CASE
+                    WHEN altitude IS NULL THEN 'Unknown'
+                    WHEN on_ground = 1     THEN 'Ground'
+                    WHEN altitude <= 5000  THEN '0-5k'
+                    WHEN altitude <= 10000 THEN '5-10k'
+                    WHEN altitude <= 25000 THEN '10-25k'
+                    WHEN altitude <= 40000 THEN '25-40k'
+                    ELSE '40k+'
+                  END as band,
+                  COUNT(*) as count
+                FROM positions GROUP BY band
+            """).fetchall()
+        return [{"band": r["band"], "count": r["count"]} for r in rows]
+
+    def category_breakdown(self) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT COALESCE(category, 'Unknown') as cat, COUNT(DISTINCT icao) as count
+                   FROM positions GROUP BY cat ORDER BY count DESC"""
+            ).fetchall()
+        return [{"category": r["cat"], "count": r["count"]} for r in rows]
+
+    # ------------------------------------------------------------------
     # Purge
     # ------------------------------------------------------------------
 
@@ -172,15 +245,24 @@ class AircraftStore:
         return count
 
     def stats(self) -> dict:
-        """Return database file size and row count."""
+        """Return database file size, row count, and time bounds."""
         import os
         with self._lock:
             row_count = self._conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+            bounds = self._conn.execute(
+                "SELECT MIN(ts), MAX(ts) FROM positions"
+            ).fetchone()
         try:
             size_bytes = os.path.getsize(self._db_path)
         except OSError:
             size_bytes = 0
-        return {"row_count": row_count, "size_bytes": size_bytes, "db_path": self._db_path}
+        return {
+            "row_count": row_count,
+            "size_bytes": size_bytes,
+            "db_path": self._db_path,
+            "oldest_ts": bounds[0] or 0,
+            "newest_ts": bounds[1] or 0,
+        }
 
     def start_purge_thread(self) -> None:
         t = threading.Thread(target=self._purge_loop, daemon=True, name="store-purge")

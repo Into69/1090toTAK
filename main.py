@@ -100,8 +100,12 @@ def main():
     registry.on_update(store.record)
 
     # ── ADS-B receiver ────────────────────────────────────────
-    from receivers.manager import ReceiverManager
-    receiver = ReceiverManager(config, registry)
+    if config.receivers:
+        from receivers.manager import MultiReceiverManager
+        receiver = MultiReceiverManager(config, registry)
+    else:
+        from receivers.manager import ReceiverManager
+        receiver = ReceiverManager(config, registry)
     receiver.start()
 
     # ── TAK sender ────────────────────────────────────────────

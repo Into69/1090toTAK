@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual"/>
   <title>1090toTAK v{{ version }}</title>
 
   <!-- Leaflet -->
@@ -13,14 +13,14 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css"/>
 
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; touch-action: none; }
 
     .navbar { height: 48px; min-height: 48px; z-index: 1100; }
     .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.05em; }
 
     #app-container {
       display: flex;
-      height: calc(100vh - 48px - 28px);
+      height: calc(100dvh - 48px - 28px);
     }
 
     /* Map */
@@ -314,7 +314,7 @@
     body.mobile-ui .navbar { height: 44px; min-height: 44px; }
 
     body.mobile-ui #app-container {
-      height: calc(100vh - 44px);
+      height: calc(100dvh - 44px);
     }
 
     body.mobile-ui #status-bar { display: none; }
@@ -396,6 +396,22 @@
     .nav-tabs .nav-link.active { background: #141618; color: #fff; border-color: #2c2f33 #2c2f33 #141618; }
     .input-group-text { background: #0d0f11; border-color: #2c2f33; color: #8899aa; }
 
+    /* Range ring labels */
+    .range-ring-label { background: none !important; border: none !important; }
+    .range-ring-label span {
+      font-size: 0.6rem; color: #4e8fd6;
+      background: rgba(13,15,17,0.75); padding: 1px 4px; border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    /* Alert highlight */
+    #aircraft-table tbody tr.alert-highlight {
+      background: rgba(255,68,68,0.12) !important;
+      border-left: 3px solid #ff4444;
+    }
+    .alert-rule-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+    .alert-rule-row select, .alert-rule-row input { font-size:0.78rem; }
+
     /* Scrollbar styling */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #141618; }
@@ -413,6 +429,9 @@
     <span id="nav-receiver-badge" class="badge bg-secondary">--</span>
     <button id="btn-history-mode" class="btn btn-sm btn-outline-secondary" title="History & Heatmap">
       <i class="bi bi-clock-history"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#stats-modal" title="Flight Statistics">
+      <i class="bi bi-bar-chart-line"></i>
     </button>
     <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#settings-modal">
       <i class="bi bi-gear-fill"></i>
@@ -566,6 +585,7 @@
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-display">Display</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-servers">Servers</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-location">Location</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-alerts">Alerts</a></li>
         </ul>
 
         <div class="tab-content">
@@ -815,6 +835,21 @@
                   </button>
                 </div>
               </div>
+
+              <!-- Multi-Receiver -->
+              <div class="col-12">
+                <hr class="border-secondary my-2"/>
+                <label class="form-label">
+                  Additional Receivers
+                  <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                    Run multiple receivers simultaneously. All data merges into a single view.
+                  </span>
+                </label>
+                <div id="multi-rx-list"></div>
+                <button class="btn btn-sm btn-outline-primary mt-2" id="btn-add-receiver">
+                  <i class="bi bi-plus-circle me-1"></i>Add Receiver
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1007,10 +1042,24 @@
                     oninput="document.getElementById('cfg-zoom-adjust-val').textContent=this.value"/>
                 </div>
               </div>
+              <div class="col-12 mt-2">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-range-rings"/>
+                  <label class="form-check-label" for="cfg-range-rings">
+                    Range Rings
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                      Show distance rings around receiver location
+                    </span>
+                  </label>
+                </div>
+                <div id="cfg-range-rings-row" style="margin-top:0.5rem;">
+                  <label class="form-label mb-1" style="font-size:0.82rem;">Distances (nm, comma-separated)</label>
+                  <input type="text" class="form-control form-control-sm" id="cfg-range-rings-nm"
+                         value="25,50,100,150,200" placeholder="25,50,100,150,200"/>
+                </div>
+              </div>
             </div>
           </div>
-
-          <!-- Servers Tab -->
           <div class="tab-pane fade" id="tab-servers">
             <div class="row g-3">
 
@@ -1184,6 +1233,51 @@
             </div>
           </div>
 
+          <!-- Alerts Tab -->
+          <div class="tab-pane fade" id="tab-alerts">
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-enabled"/>
+                  <label class="form-check-label" for="cfg-alerts-enabled">Enable Alerts</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-emergency"/>
+                  <label class="form-check-label" for="cfg-alerts-emergency">
+                    Emergency squawks (7500/7600/7700)
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Always alert on emergency transponder codes</span>
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-browser"/>
+                  <label class="form-check-label" for="cfg-alerts-browser">
+                    Browser notifications
+                  </label>
+                </div>
+                <button class="btn btn-xs btn-outline-secondary mt-1" style="font-size:0.7rem;" onclick="Notification.requestPermission()">
+                  Request permission
+                </button>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-autoselect"/>
+                  <label class="form-check-label" for="cfg-alerts-autoselect">Auto-select matching aircraft on map</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Alert Rules</label>
+                <div id="alert-rules-list"></div>
+                <button class="btn btn-sm btn-outline-primary mt-2" id="btn-add-alert-rule">
+                  <i class="bi bi-plus-circle me-1"></i>Add Rule
+                </button>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="modal-footer">
@@ -1191,6 +1285,66 @@
         <button type="button" class="btn btn-sm btn-primary" id="save-settings-btn">
           <i class="bi bi-check2 me-1"></i>Save & Apply
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Stats Modal -->
+<div class="modal fade" id="stats-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header border-secondary py-2">
+        <h5 class="modal-title"><i class="bi bi-bar-chart-line me-2" style="color:#4e8fd6"></i>Flight Statistics</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Big number cards -->
+        <div class="row g-2 mb-3" id="stats-cards">
+          <div class="col-6 col-md-3">
+            <div class="card bg-black border-secondary text-center p-2">
+              <div style="font-size:1.6rem;font-weight:700;color:#5bc0eb" id="stat-unique-all">—</div>
+              <div style="font-size:0.7rem;color:#8899aa">All-time Unique</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card bg-black border-secondary text-center p-2">
+              <div style="font-size:1.6rem;font-weight:700;color:#5bc0eb" id="stat-unique-today">—</div>
+              <div style="font-size:0.7rem;color:#8899aa">Seen Today</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card bg-black border-secondary text-center p-2">
+              <div style="font-size:1.6rem;font-weight:700;color:#5bc0eb" id="stat-current">—</div>
+              <div style="font-size:0.7rem;color:#8899aa">Current</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card bg-black border-secondary text-center p-2">
+              <div style="font-size:1.6rem;font-weight:700;color:#5bc0eb" id="stat-peak">—</div>
+              <div style="font-size:0.7rem;color:#8899aa">Peak Concurrent</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Aircraft -->
+        <h6 style="color:#8899aa;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.06em;">Top Aircraft</h6>
+        <table class="table table-sm table-dark table-borderless mb-3" style="font-size:0.75rem;">
+          <thead><tr><th>#</th><th>ICAO</th><th>Callsign</th><th>Positions</th></tr></thead>
+          <tbody id="stats-top-aircraft"></tbody>
+        </table>
+
+        <!-- Altitude Distribution -->
+        <h6 style="color:#8899aa;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.06em;">Altitude Distribution</h6>
+        <div id="stats-altitude" class="mb-3"></div>
+
+        <!-- Hourly Activity -->
+        <h6 style="color:#8899aa;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.06em;">Hourly Activity</h6>
+        <div id="stats-hourly" style="display:flex;align-items:flex-end;gap:1px;height:80px;margin-bottom:1rem;"></div>
+
+        <!-- Category Breakdown -->
+        <h6 style="color:#8899aa;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.06em;">Category Breakdown</h6>
+        <div id="stats-category" class="mb-2"></div>
       </div>
     </div>
   </div>
@@ -1644,7 +1798,8 @@ function renderTable() {
     const emerg = isEmergency(ac) ? "emergency" : "";
     const gnd   = ac.on_ground ? "on-ground" : "";
     const sel   = ac.icao === selectedIcao ? "selected" : "";
-    return `<tr class="${emerg} ${gnd} ${sel}" data-icao="${ac.icao}">
+    const alrt  = alertedAircraft.has(ac.icao) ? "alert-highlight" : "";
+    return `<tr class="${emerg} ${gnd} ${sel} ${alrt}" data-icao="${ac.icao}">
       <td style="font-family:monospace;font-size:0.7rem;">${ac.icao}</td>
       <td>${fmtCallsign(ac.callsign)}</td>
       <td>${formatAlt(ac.altitude, ac.on_ground)}</td>
@@ -1720,6 +1875,27 @@ function selectAircraft(icao) {
   }
 }
 
+// ============================================================
+// AIRCRAFT PHOTOS
+// ============================================================
+const photoCache = new Map();
+const PHOTO_CACHE_TTL = 3600000; // 1 hour
+
+async function fetchAircraftPhoto(icao) {
+  const cached = photoCache.get(icao);
+  if (cached && Date.now() - cached.ts < PHOTO_CACHE_TTL) return cached.url;
+  try {
+    const r = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao}`);
+    const d = await r.json();
+    const url = d.photos?.[0]?.thumbnail_large?.src || null;
+    photoCache.set(icao, { url, ts: Date.now() });
+    return url;
+  } catch {
+    photoCache.set(icao, { url: null, ts: Date.now() });
+    return null;
+  }
+}
+
 function renderDetail(ac) {
   const panel = document.getElementById("detail-panel");
   if (!ac) {
@@ -1756,12 +1932,21 @@ function renderDetail(ac) {
         <i class="bi bi-send"></i> TAK
       </button>
     </h6>
+    <div id="ac-photo" style="text-align:center;min-height:0;"></div>
     ${rows.map(([l,v]) => `
       <div class="detail-row">
         <span class="detail-label">${l}</span>
         <span class="detail-value">${v}</span>
       </div>`).join("")}
   `;
+
+  fetchAircraftPhoto(ac.icao).then(url => {
+    const el = document.getElementById("ac-photo");
+    if (!el || selectedIcao !== ac.icao) return;
+    if (url) {
+      el.innerHTML = `<img src="${url}" alt="" style="max-width:100%;max-height:120px;border-radius:4px;border:1px solid #2c2f33;margin-bottom:6px;" onerror="this.parentElement.innerHTML=''"/>`;
+    }
+  });
 }
 
 function sendToTak(icao) {
@@ -1860,6 +2045,7 @@ function connectWebSocket() {
           seen.add(ac.icao);
           aircraft[ac.icao] = ac;
           updateMarker(ac);
+          checkAlerts(ac);
         }
 
         const inHistory = document.body.classList.contains("history-active");
@@ -2390,6 +2576,9 @@ function loadSettingsForm(cfg) {
   updateTileSelection(cfg.web?.map_type || "osm");
   updateIconSelection(cfg.web?.icon_type || "arrow");
 
+  document.getElementById("cfg-range-rings").checked = cfg.web?.range_rings || false;
+  document.getElementById("cfg-range-rings-nm").value = cfg.web?.range_rings_nm || "25,50,100,150,200";
+
   const locMode = cfg.location?.mode || "none";
   document.getElementById("cfg-location-mode").value = locMode;
   document.getElementById("cfg-location-lat").value  = cfg.location?.lat || "";
@@ -2397,6 +2586,16 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-gpsd-host").value     = cfg.location?.gpsd_host || "127.0.0.1";
   document.getElementById("cfg-gpsd-port").value     = cfg.location?.gpsd_port || 2947;
   updateLocationFields();
+
+  // Alerts
+  document.getElementById("cfg-alerts-enabled").checked = cfg.alerts?.enabled ?? true;
+  document.getElementById("cfg-alerts-emergency").checked = cfg.alerts?.emergency_squawks ?? true;
+  document.getElementById("cfg-alerts-browser").checked = cfg.alerts?.browser_notifications || false;
+  document.getElementById("cfg-alerts-autoselect").checked = cfg.alerts?.auto_select || false;
+  renderAlertRules(cfg.alerts?.rules || []);
+
+  // Multi-receiver
+  renderReceiverList(cfg.receivers || []);
 }
 
 // ── Gain preview state ────────────────────────────────────────────────────
@@ -2757,6 +2956,8 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       zoom_adjust: parseInt(document.getElementById("cfg-zoom-adjust").value),
       icon_type: document.querySelector(".icon-option.border-primary")?.dataset.icon ||
                  appConfig.web?.icon_type || "arrow",
+      range_rings: document.getElementById("cfg-range-rings").checked,
+      range_rings_nm: document.getElementById("cfg-range-rings-nm").value.trim(),
     },
     servers: {
       sbs_enabled: document.getElementById("cfg-sbs-server-enabled").checked,
@@ -2778,6 +2979,14 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
     },
     aircraft_ttl: parseInt(document.getElementById("cfg-ttl").value),
     history_ttl:  parseInt(document.getElementById("cfg-history-ttl").value),
+    alerts: {
+      enabled: document.getElementById("cfg-alerts-enabled").checked,
+      emergency_squawks: document.getElementById("cfg-alerts-emergency").checked,
+      browser_notifications: document.getElementById("cfg-alerts-browser").checked,
+      auto_select: document.getElementById("cfg-alerts-autoselect").checked,
+      rules: collectAlertRules(),
+    },
+    receivers: collectReceiverList(),
   };
 
   fetch("/api/config", {
@@ -2795,7 +3004,11 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       if (autoView) applyAutoView();
       iconType = payload.web.icon_type;
       refreshAllMarkers();
+      rangeRingsEnabled = payload.web.range_rings;
+      rangeRingsNm = (payload.web.range_rings_nm || "").split(",").map(Number).filter(n => n > 0);
+      drawRangeRings();
       aircraftTTL = payload.aircraft_ttl;
+      alertConfig = payload.alerts;
       showToast("Settings saved", "success");
     } else {
       gainSaving = false;
@@ -2998,6 +3211,304 @@ if (isMobile()) {
 // ============================================================
 let sensorMarker = null;
 
+// ============================================================
+// RANGE RINGS
+// ============================================================
+let rangeRingsLayer = L.layerGroup();
+let rangeRingsEnabled = {{ 'true' if config.web.range_rings else 'false' }};
+let rangeRingsNm = "{{ config.web.range_rings_nm }}".split(",").map(Number).filter(n => n > 0);
+let sensorLat = null, sensorLon = null;
+
+function drawRangeRings() {
+  rangeRingsLayer.clearLayers();
+  if (!rangeRingsEnabled || sensorLat == null || sensorLon == null) {
+    rangeRingsLayer.remove();
+    return;
+  }
+  rangeRingsLayer.addTo(map);
+  const NM = 1852;
+  for (const nm of rangeRingsNm) {
+    L.circle([sensorLat, sensorLon], {
+      radius: nm * NM, color: "#4e8fd6", weight: 1,
+      fillOpacity: 0, opacity: 0.35, dashArray: "6,4", interactive: false,
+    }).addTo(rangeRingsLayer);
+    const labelLat = sensorLat + (nm * NM) / 111320;
+    L.marker([labelLat, sensorLon], {
+      icon: L.divIcon({
+        className: "range-ring-label",
+        html: `<span>${nm} nm</span>`,
+        iconSize: [50, 16], iconAnchor: [25, 8],
+      }),
+      interactive: false,
+    }).addTo(rangeRingsLayer);
+  }
+}
+
+// ============================================================
+// ============================================================
+// MULTI-RECEIVER UI
+// ============================================================
+function renderReceiverList(receivers) {
+  const list = document.getElementById("multi-rx-list");
+  if (!receivers || !receivers.length) {
+    list.innerHTML = '<div style="font-size:0.75rem;color:#556;">No additional receivers configured.</div>';
+    return;
+  }
+  list.innerHTML = receivers.map((r, i) => `
+    <div class="card bg-black border-secondary mb-2" data-rx-idx="${i}">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <input type="text" class="form-control form-control-sm" style="width:120px;"
+                 placeholder="Label" value="${r.label || ""}" data-rx="label"/>
+          <select class="form-select form-select-sm" style="width:100px;" data-rx="type">
+            <option value="sbs"${r.type==="sbs"?" selected":""}>SBS</option>
+            <option value="avr"${r.type==="avr"?" selected":""}>AVR</option>
+            <option value="json"${r.type==="json"?" selected":""}>JSON API</option>
+          </select>
+          <input type="text" class="form-control form-control-sm" style="flex:1;"
+                 placeholder="Host" value="${r.host || "127.0.0.1"}" data-rx="host"/>
+          <input type="number" class="form-control form-control-sm" style="width:80px;"
+                 placeholder="Port" value="${r.sbs_port || 30003}" data-rx="port"/>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" ${r.enabled !== false?"checked":""}
+                   data-rx="enabled"/>
+          </div>
+          <button class="btn btn-xs btn-outline-danger" style="font-size:0.7rem;"
+                  onclick="this.closest('.card').remove()"><i class="bi bi-x"></i></button>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function collectReceiverList() {
+  const cards = document.querySelectorAll("#multi-rx-list .card[data-rx-idx]");
+  return Array.from(cards).map((card, i) => {
+    const type = card.querySelector('[data-rx="type"]').value;
+    const port = parseInt(card.querySelector('[data-rx="port"]').value) || 30003;
+    const portKey = type === "json" ? "json_port" : type === "avr" ? "avr_port" : "sbs_port";
+    return {
+      id: "rx" + i,
+      label: card.querySelector('[data-rx="label"]').value || ("Receiver " + (i+1)),
+      type: type,
+      host: card.querySelector('[data-rx="host"]').value || "127.0.0.1",
+      [portKey]: port,
+      enabled: card.querySelector('[data-rx="enabled"]').checked,
+    };
+  });
+}
+
+document.getElementById("btn-add-receiver").addEventListener("click", () => {
+  const rxs = collectReceiverList();
+  rxs.push({ label: "", type: "sbs", host: "127.0.0.1", sbs_port: 30003, enabled: true });
+  renderReceiverList(rxs);
+});
+
+// ============================================================
+// AIRCRAFT ALERTS
+// ============================================================
+let alertConfig = {
+  enabled: {{ 'true' if config.alerts.enabled else 'false' }},
+  browser_notifications: {{ 'true' if config.alerts.browser_notifications else 'false' }},
+  auto_select: {{ 'true' if config.alerts.auto_select else 'false' }},
+  emergency_squawks: {{ 'true' if config.alerts.emergency_squawks else 'false' }},
+  rules: {{ config.alerts.rules | tojson }},
+};
+const alertCooldown = new Map(); // key: "icao:ruleIdx" -> timestamp
+const alertedAircraft = new Set(); // icaos with active alerts
+const ALERT_COOLDOWN_MS = 60000;
+
+function checkAlerts(ac) {
+  if (!alertConfig.enabled) return;
+  const now = Date.now();
+  let matched = false;
+
+  // Emergency squawks
+  if (alertConfig.emergency_squawks && ac.squawk && ["7500","7600","7700"].includes(ac.squawk)) {
+    const key = ac.icao + ":emerg";
+    if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
+      alertCooldown.set(key, now);
+      const labels = {"7500":"Hijack","7600":"Radio Failure","7700":"Emergency"};
+      fireAlert(ac, `Emergency: ${labels[ac.squawk] || ac.squawk}`);
+      matched = true;
+    }
+  }
+
+  // Custom rules
+  for (let i = 0; i < alertConfig.rules.length; i++) {
+    const rule = alertConfig.rules[i];
+    if (!rule.enabled) continue;
+    const key = ac.icao + ":" + i;
+    if (alertCooldown.has(key) && now - alertCooldown.get(key) < ALERT_COOLDOWN_MS) continue;
+
+    let hit = false;
+    switch (rule.type) {
+      case "icao":
+        hit = ac.icao.toUpperCase() === (rule.value || "").toUpperCase();
+        break;
+      case "callsign":
+        if (ac.callsign && rule.value) {
+          try { hit = new RegExp(rule.value, "i").test(ac.callsign); }
+          catch { hit = ac.callsign.toUpperCase().includes(rule.value.toUpperCase()); }
+        }
+        break;
+      case "squawk":
+        hit = ac.squawk === rule.value;
+        break;
+      case "military":
+        // Common US military ICAO ranges
+        if (ac.icao) {
+          const hex = parseInt(ac.icao, 16);
+          hit = (hex >= 0xADF7C0 && hex <= 0xAFFFFF) || // US military
+                (hex >= 0x43C000 && hex <= 0x43CFFF);    // UK military
+        }
+        break;
+      case "proximity":
+        if (ac.lat != null && sensorLat != null && rule.value) {
+          const dLat = (ac.lat - sensorLat) * 60;
+          const dLon = (ac.lon - sensorLon) * 60 * Math.cos(sensorLat * Math.PI / 180);
+          const distNm = Math.sqrt(dLat*dLat + dLon*dLon);
+          hit = distNm <= parseFloat(rule.value);
+        }
+        break;
+    }
+    if (hit) {
+      alertCooldown.set(key, now);
+      fireAlert(ac, rule.name || rule.type);
+      matched = true;
+    }
+  }
+
+  if (matched) {
+    alertedAircraft.add(ac.icao);
+    if (alertConfig.auto_select && selectedIcao !== ac.icao) selectAircraft(ac.icao);
+  }
+}
+
+function fireAlert(ac, label) {
+  const title = `${ac.callsign || ac.icao} — ${label}`;
+  const body = [
+    ac.altitude != null ? `${ac.altitude.toLocaleString()} ft` : null,
+    ac.ground_speed != null ? `${ac.ground_speed} kts` : null,
+    ac.squawk ? `Squawk ${ac.squawk}` : null,
+  ].filter(Boolean).join(" | ");
+
+  showToast(`Alert: ${title}${body ? " — " + body : ""}`, "danger");
+
+  if (alertConfig.browser_notifications && Notification.permission === "granted") {
+    new Notification(title, { body, icon: "/static/tile-sw.js", silent: false });
+  }
+}
+
+// Alert rule UI helpers
+function renderAlertRules(rules) {
+  const list = document.getElementById("alert-rules-list");
+  list.innerHTML = rules.map((r, i) => `
+    <div class="alert-rule-row" data-idx="${i}">
+      <input type="text" class="form-control form-control-sm" style="width:100px;" placeholder="Name"
+             value="${r.name || ""}" data-field="name"/>
+      <select class="form-select form-select-sm" style="width:110px;" data-field="type">
+        <option value="icao"${r.type==="icao"?" selected":""}>ICAO</option>
+        <option value="callsign"${r.type==="callsign"?" selected":""}>Callsign</option>
+        <option value="squawk"${r.type==="squawk"?" selected":""}>Squawk</option>
+        <option value="military"${r.type==="military"?" selected":""}>Military</option>
+        <option value="proximity"${r.type==="proximity"?" selected":""}>Proximity</option>
+      </select>
+      <input type="text" class="form-control form-control-sm" style="flex:1;" placeholder="Value"
+             value="${r.value || ""}" data-field="value"/>
+      <div class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" ${r.enabled?"checked":""} data-field="enabled"/>
+      </div>
+      <button class="btn btn-xs btn-outline-danger" onclick="this.closest('.alert-rule-row').remove()" style="font-size:0.7rem;">
+        <i class="bi bi-x"></i>
+      </button>
+    </div>
+  `).join("");
+}
+
+function collectAlertRules() {
+  const rows = document.querySelectorAll("#alert-rules-list .alert-rule-row");
+  return Array.from(rows).map(row => ({
+    name: row.querySelector('[data-field="name"]').value,
+    type: row.querySelector('[data-field="type"]').value,
+    value: row.querySelector('[data-field="value"]').value,
+    enabled: row.querySelector('[data-field="enabled"]').checked,
+  }));
+}
+
+document.getElementById("btn-add-alert-rule").addEventListener("click", () => {
+  const rules = collectAlertRules();
+  rules.push({ name: "", type: "icao", value: "", enabled: true });
+  renderAlertRules(rules);
+});
+
+// ============================================================
+// FLIGHT STATISTICS DASHBOARD
+// ============================================================
+document.getElementById("stats-modal").addEventListener("show.bs.modal", () => {
+  fetch("/api/store/dashboard").then(r => r.json()).then(d => {
+    if (d.error) return;
+    document.getElementById("stat-unique-all").textContent = d.unique_all_time.toLocaleString();
+    document.getElementById("stat-unique-today").textContent = d.unique_today.toLocaleString();
+    document.getElementById("stat-current").textContent = d.current_count.toLocaleString();
+    document.getElementById("stat-peak").textContent = d.peak_concurrent.toLocaleString();
+
+    // Top aircraft table
+    const tbody = document.getElementById("stats-top-aircraft");
+    tbody.innerHTML = d.top_aircraft.map((a, i) =>
+      `<tr><td>${i+1}</td><td>${a.icao}</td><td>${a.callsign || "—"}</td><td>${a.count.toLocaleString()}</td></tr>`
+    ).join("");
+
+    // Altitude distribution — horizontal bar chart
+    const altDiv = document.getElementById("stats-altitude");
+    const altMax = Math.max(...d.altitude_distribution.map(a => a.count), 1);
+    const altOrder = ["Ground","0-5k","5-10k","10-25k","25-40k","40k+","Unknown"];
+    const altSorted = altOrder.map(b => d.altitude_distribution.find(a => a.band === b)).filter(Boolean);
+    altDiv.innerHTML = altSorted.map(a => {
+      const pct = (a.count / altMax * 100).toFixed(1);
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+        <span style="width:55px;font-size:0.7rem;color:#8899aa;text-align:right;">${a.band}</span>
+        <div style="flex:1;background:#1f2226;border-radius:3px;height:14px;">
+          <div style="width:${pct}%;background:#4e8fd6;height:100%;border-radius:3px;min-width:${a.count?2:0}px;"></div>
+        </div>
+        <span style="width:50px;font-size:0.65rem;color:#8899aa;">${a.count.toLocaleString()}</span>
+      </div>`;
+    }).join("");
+
+    // Hourly activity — vertical bar chart
+    const hourDiv = document.getElementById("stats-hourly");
+    const hourMax = Math.max(...d.hourly_histogram.map(h => h.count), 1);
+    hourDiv.innerHTML = d.hourly_histogram.map(h => {
+      const pct = (h.count / hourMax * 100).toFixed(1);
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${h.label}: ${h.count} aircraft">
+        <div style="width:100%;background:#4e8fd6;border-radius:2px 2px 0 0;min-height:1px;" style="height:${pct}%"></div>
+      </div>`;
+    }).join("");
+    // Fix: set height via style attribute properly
+    hourDiv.querySelectorAll("div > div").forEach((bar, i) => {
+      const pct = (d.hourly_histogram[i].count / hourMax * 100).toFixed(1);
+      bar.style.height = pct + "%";
+    });
+
+    // Category breakdown
+    const catDiv = document.getElementById("stats-category");
+    const catMax = Math.max(...d.category_breakdown.map(c => c.count), 1);
+    catDiv.innerHTML = d.category_breakdown.slice(0, 10).map(c => {
+      const pct = (c.count / catMax * 100).toFixed(1);
+      return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+        <span style="width:55px;font-size:0.7rem;color:#8899aa;text-align:right;">${c.category}</span>
+        <div style="flex:1;background:#1f2226;border-radius:3px;height:14px;">
+          <div style="width:${pct}%;background:#5bc0eb;height:100%;border-radius:3px;min-width:${c.count?2:0}px;"></div>
+        </div>
+        <span style="width:50px;font-size:0.65rem;color:#8899aa;">${c.count.toLocaleString()}</span>
+      </div>`;
+    }).join("");
+  }).catch(() => {});
+});
+
+// ============================================================
+// SENSOR MARKER
+// ============================================================
 const houseIcon = L.divIcon({
   className: "",
   html: '<i class="bi bi-house-fill" style="font-size:1.4rem;color:#888888;text-shadow:0 0 4px #000;"></i>',
@@ -3007,6 +3518,8 @@ const houseIcon = L.divIcon({
 });
 
 function updateSensorMarker(lat, lon) {
+  sensorLat = lat; sensorLon = lon;
+  drawRangeRings();
   if (lat == null || lon == null) {
     if (sensorMarker) { map.removeLayer(sensorMarker); sensorMarker = null; }
     return;
@@ -3375,12 +3888,6 @@ function restartApp() {
     if (sensorMarker) map.removeLayer(sensorMarker);
     // Deselect any aircraft
     if (selectedIcao) { selectedIcao = null; renderDetail(null); clearTrack(); }
-    // Initialise datetime pickers to "last 24 h"
-    const now = Date.now() / 1000;
-    const startTs = now - 86400;
-    document.getElementById("hist-end").value   = toLocalDatetimeValue(now);
-    document.getElementById("hist-start").value = toLocalDatetimeValue(startTs);
-    histStart = startTs; histEnd = now;
     // Default to heatmap mode
     histCurMode = "heatmap";
     document.getElementById("hist-mode-heatmap").classList.add("active");
@@ -3391,16 +3898,33 @@ function restartApp() {
       histLayerGrp = L.layerGroup().addTo(map);
     }
     // Pause live aircraft updates from reaching the map while in history mode
-    // (they still update in the background; we just don't re-render)
     document.getElementById("hist-ac-badge").classList.remove("d-none");
     const badge = document.getElementById("nav-receiver-badge");
     badge.textContent = "← LIVE";
     badge.className   = "badge bg-warning text-dark";
     badge.style.cursor = "pointer";
     badge.title = "Back to live";
-    // Let the browser reflow (sidebar hidden, map expanded) before telling
-    // Leaflet to recalculate its size and request the newly-visible tiles.
-    setTimeout(() => { map.invalidateSize(); loadHeatmap(); }, 50);
+    // Initialise datetime pickers to actual data bounds (fall back to last 24 h)
+    fetch("/api/store/stats").then(r => r.json()).then(stats => {
+      const now = Date.now() / 1000;
+      if (stats.oldest_ts && stats.newest_ts) {
+        histStart = stats.oldest_ts;
+        histEnd   = stats.newest_ts;
+      } else {
+        histStart = now - 86400;
+        histEnd   = now;
+      }
+      document.getElementById("hist-start").value = toLocalDatetimeValue(histStart);
+      document.getElementById("hist-end").value   = toLocalDatetimeValue(histEnd);
+      // Pick the right preset button if data span matches one
+      document.querySelectorAll(".hist-preset").forEach(b => b.classList.remove("active"));
+      const spanHours = Math.round((histEnd - histStart) / 3600);
+      const matchBtn = document.querySelector(`.hist-preset[data-hours="${spanHours}"]`);
+      if (matchBtn) matchBtn.classList.add("active");
+      // Let the browser reflow (sidebar hidden, map expanded) before telling
+      // Leaflet to recalculate its size and request the newly-visible tiles.
+      setTimeout(() => { map.invalidateSize(); loadHeatmap(); }, 50);
+    });
   }
 
   function exitHistory() {
@@ -3542,19 +4066,18 @@ function restartApp() {
       if (!pos) continue;
       visible.add(icao);
       const ll = [pos.lat, pos.lon];
+      // Build a pseudo-aircraft object for makeIcon()
+      const ac = { icao, ...pos };
+      const icon = makeIcon(ac);
       // Marker
       if (!histMarkers[icao]) {
-        const icon = L.divIcon({
-          className: "",
-          html: `<div style="width:8px;height:8px;border-radius:50%;background:#4e8fd6;border:1px solid #fff;"></div>`,
-          iconSize: [8, 8], iconAnchor: [4, 4],
-        });
         histMarkers[icao] = L.marker(ll, {icon, title: icao}).addTo(histLayerGrp);
         histMarkers[icao].bindPopup("", { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
         histMarkers[icao].on("mouseover", function () { openPopupSmart(this); });
         histMarkers[icao].on("mouseout",  function () { this.closePopup(); });
       } else {
         histMarkers[icao].setLatLng(ll);
+        histMarkers[icao].setIcon(icon);
       }
       // Update popup content
       histMarkers[icao].setPopupContent(histPopupHtml(icao, pos));
