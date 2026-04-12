@@ -6,6 +6,7 @@ Aircraft type codes follow MIL-STD-2525 symbology.
 """
 
 import math
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -71,7 +72,13 @@ def _cot_type(aircraft: Aircraft) -> str:
 class CotBuilder:
     def build(self, aircraft: Aircraft, aircraft_ttl: int = 60) -> bytes:
         now = datetime.now(timezone.utc)
-        stale = now + timedelta(seconds=aircraft_ttl)
+        # Stale clock tracks position age, not last-seen — a CoT track without
+        # a fresh position is useless, so let TAK drop it when the position
+        # ages out rather than holding it on the strength of a Mode S echo.
+        ref_ts = aircraft.last_position or aircraft.last_seen
+        age_s = time.time() - ref_ts
+        remaining = max(0, aircraft_ttl - age_s)
+        stale = now + timedelta(seconds=remaining)
         time_str = _iso_z(now)
         stale_str = _iso_z(stale)
 

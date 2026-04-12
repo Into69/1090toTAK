@@ -8,7 +8,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 RECEIVER_SBS           = "sbs"            # dump1090 TCP port 30003 (BaseStation format)
 RECEIVER_AVR           = "avr"            # dump1090 TCP port 30002 (AVR raw frames)
 RECEIVER_AVR_SUBPROCESS = "avr_subprocess" # spawn rtl_adsb, read AVR frames from stdout
-RECEIVER_RTLSDR        = "rtlsdr"         # Direct RTL-SDR via pyrtlsdr
+RECEIVER_RTLSDR        = "rtlsdr"         # Direct RTL-SDR via built-in ctypes / librtlsdr
 RECEIVER_JSON          = "json"           # dump1090 / tar1090 HTTP JSON API
 RECEIVER_HACKRF        = "hackrf"         # Direct HackRF One via hackrf library
 RECEIVER_USRP          = "usrp"           # Direct USRP B205mini/B206mini via uhd
@@ -40,6 +40,7 @@ class ReceiverConfig:
     rtlsdr_agc: bool = False
     rtlsdr_ppm: int = 0
     rtlsdr_device_index: int = 0
+    rtlsdr_bias_tee: bool = False   # only meaningful on RTL-SDR Blog V3/V4
     hackrf_device_index: int = 0
     hackrf_lna_gain: int = 16     # 0-40 dB, steps of 8
     hackrf_vga_gain: int = 20     # 0-62 dB, steps of 2
@@ -70,6 +71,9 @@ class WebConfig:
     icon_type: str = "arrow"  # "arrow" | "plane" | "heli" | "dot" | "milsymbol"
     range_rings: bool = False
     range_rings_nm: str = "25,50,100,150,200"
+    range_rings_opacity: float = 0.6
+    range_rings_color: str = "#4e8fd6"
+    range_rings_units: str = "nm"
 
 
 @dataclass
@@ -104,7 +108,6 @@ class LocationConfig:
 @dataclass
 class AlertConfig:
     enabled: bool = True
-    browser_notifications: bool = False
     auto_select: bool = False
     emergency_squawks: bool = True
     rules: list = field(default_factory=list)  # [{name, type, value, enabled}]

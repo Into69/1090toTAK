@@ -15,10 +15,15 @@ except (ImportError, Exception):
     HAS_PYMODES = False
 
 try:
-    from rtlsdr import RtlSdr  # noqa: F401
+    from receivers.rtlsdr_ctypes import RtlSdr  # noqa: F401 — built-in ctypes wrapper
     HAS_RTLSDR = True
-except ImportError:
-    HAS_RTLSDR = False
+except (ImportError, OSError):
+    # Falls back to pyrtlsdr pip package if librtlsdr is not installed
+    try:
+        from rtlsdr import RtlSdr  # noqa: F401
+        HAS_RTLSDR = True
+    except ImportError:
+        HAS_RTLSDR = False
 
 try:
     import hackrf as _hackrf_mod  # noqa: F401

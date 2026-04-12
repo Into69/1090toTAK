@@ -18,9 +18,16 @@
     .navbar { height: 48px; min-height: 48px; z-index: 1100; }
     .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.05em; }
 
+    #page-body {
+      display: flex;
+      flex-direction: column;
+      height: calc(100dvh - 48px);
+      overflow: hidden;
+    }
     #app-container {
       display: flex;
-      height: calc(100dvh - 48px - 28px);
+      flex: 1;
+      min-height: 0;
     }
 
     /* Map */
@@ -150,11 +157,29 @@
     #detail-panel .detail-label { color: #8899aa; }
     #detail-panel .detail-value { color: #fff; font-family: monospace; }
 
-    /* Spectrum panel */
+    /* Spectrum panel (main page, desktop only) */
+    #spectrum-panel {
+      background: #0a0c10;
+      border-top: 1px solid #1f2226;
+    }
+    #spectrum-panel .sp-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 3px 12px; cursor: pointer; user-select: none;
+      font-size: 0.7rem; color: #8899aa;
+    }
+    #spectrum-panel .sp-header:hover { color: #cdd0d5; }
+    #spectrum-panel .sp-body {
+      padding: 0 12px 6px;
+      overflow: hidden;
+      transition: max-height 0.25s ease;
+      max-height: 300px;
+    }
+    #spectrum-panel.collapsed .sp-body { max-height: 0; padding: 0 12px; }
+    body.mobile-ui #spectrum-panel { display: none; }
 
     /* Status bar */
     #status-bar {
-      height: 28px;
+      height: 28px; flex-shrink: 0;
       background: #0d0f11;
       border-top: 1px solid #1f2226;
       display: flex;
@@ -314,7 +339,7 @@
     /* ── Mobile UI ─────────────────────────────────────────── */
     body.mobile-ui .navbar { height: 44px; min-height: 44px; }
 
-    body.mobile-ui #app-container {
+    body.mobile-ui #page-body {
       height: calc(100dvh - 44px);
     }
 
@@ -441,6 +466,7 @@
 </nav>
 
 <!-- Main -->
+<div id="page-body">
 <div id="app-container">
   <!-- Map -->
   <div id="map-wrapper">
@@ -535,6 +561,21 @@
   </div>
 </div>
 
+<!-- Spectrum panel (desktop only, collapsible) -->
+<div id="spectrum-panel" class="collapsed" style="display:none;">
+  <div class="sp-header" id="spectrum-panel-toggle">
+    <i class="bi bi-chevron-up" id="spectrum-panel-chevron" style="transition:transform 0.2s;transform:rotate(180deg);"></i>
+    <span>Live Spectrum</span>
+    <span id="spectrum-main-hint" style="font-family:monospace;color:#556677;font-size:0.65rem;margin-left:auto;"></span>
+  </div>
+  <div class="sp-body">
+    <canvas id="spectrum-canvas-main"
+            style="width:100%;height:60px;display:block;border-radius:3px 3px 0 0;background:#080a0c;"></canvas>
+    <canvas id="waterfall-canvas-main"
+            style="width:100%;height:100px;display:block;border-radius:0 0 3px 3px;background:#05080c;border-top:1px solid #24324a;"></canvas>
+  </div>
+</div>
+
 <!-- Status bar -->
 <div id="status-bar">
   <div class="status-item" id="status-item-receiver" data-tooltip="">
@@ -570,6 +611,7 @@
     <span id="status-msg-count">0 msg</span>
   </div>
 </div>
+</div><!-- /page-body -->
 
 <!-- Settings Modal -->
 <div class="modal fade" id="settings-modal" tabindex="-1">
@@ -598,9 +640,9 @@
               <div class="col-12">
                 <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
                   <i class="bi bi-info-circle me-1"></i>
-                  <strong>pyrtlsdr not installed.</strong>
+                  <strong>librtlsdr not found.</strong>
                   Direct RTL-SDR source is unavailable.
-                  <code style="display:block;margin-top:4px;">pip install pyrtlsdr</code>
+                  <code style="display:block;margin-top:4px;">apt install librtlsdr-dev / brew install librtlsdr / rtlsdr.dll on PATH</code>
                 </div>
               </div>
               {% endif %}
@@ -632,7 +674,7 @@
                   <option value="json">JSON API (port 8080) — richest data</option>
                   <option value="avr_subprocess">Direct RTL-SDR (rtl_adsb subprocess)</option>
                   <option value="rtlsdr"{% if not has_rtlsdr %} disabled{% endif %}>
-                    Direct RTL-SDR (pyrtlsdr){% if not has_rtlsdr %} — requires pyrtlsdr{% endif %}
+                    Direct RTL-SDR (librtlsdr){% if not has_rtlsdr %} — requires librtlsdr{% endif %}
                   </option>
                   <option value="hackrf"{% if not has_hackrf %} disabled{% endif %}>
                     Direct HackRF One{% if not has_hackrf %} — requires hackrf{% endif %}
@@ -688,6 +730,16 @@
                   <div class="col-md-3">
                     <label class="form-label">PPM Correction</label>
                     <input type="number" class="form-control form-control-sm" id="cfg-rtlsdr-ppm" value="0"/>
+                  </div>
+                  <div class="col-md-3" id="cfg-rtlsdr-bias-tee-wrap" style="display:none;">
+                    <label class="form-label">Bias Tee (LNA 5V)</label>
+                    <div class="form-check form-switch mt-1">
+                      <input class="form-check-input" type="checkbox" id="cfg-rtlsdr-bias-tee">
+                      <label class="form-check-label" for="cfg-rtlsdr-bias-tee">Enable</label>
+                    </div>
+                    <small class="text-muted" style="font-size:0.68rem;">
+                      RTL-SDR Blog V3/V4 only. Powers an external LNA over the coax.
+                    </small>
                   </div>
                 </div>
                 <!-- Gain preview notification bar -->
@@ -792,7 +844,9 @@
                   </button>
                 </label>
                 <canvas id="spectrum-canvas-tab"
-                        style="width:100%;height:150px;display:block;border-radius:4px;background:#080a0c;"></canvas>
+                        style="width:100%;height:150px;display:block;border-radius:4px 4px 0 0;background:#080a0c;"></canvas>
+                <canvas id="waterfall-canvas-tab"
+                        style="width:100%;height:140px;display:block;border-radius:0 0 4px 4px;background:#05080c;border-top:1px solid #24324a;"></canvas>
                 <div style="display:flex;align-items:center;gap:16px;margin-top:5px;font-size:0.68rem;">
                   <span style="color:#556677;">Floor</span>
                   <span id="sq-spec-floor" style="font-family:monospace;color:#cdd0d5;">—</span>
@@ -1054,9 +1108,35 @@
                   </label>
                 </div>
                 <div id="cfg-range-rings-row" style="margin-top:0.5rem;">
-                  <label class="form-label mb-1" style="font-size:0.82rem;">Distances (nm, comma-separated)</label>
+                  <label class="form-label mb-1" style="font-size:0.82rem;">Distances (comma-separated)</label>
                   <input type="text" class="form-control form-control-sm" id="cfg-range-rings-nm"
                          value="25,50,100,150,200" placeholder="25,50,100,150,200"/>
+                  <label class="form-label mb-1 mt-2" style="font-size:0.82rem;">Units</label>
+                  <div class="btn-group btn-group-sm w-100" role="group">
+                    <input type="radio" class="btn-check" name="cfg-rr-units" id="rr-unit-nm" value="nm" autocomplete="off"
+                           onchange="rangeRingsUnits='nm'; drawRangeRings();">
+                    <label class="btn btn-outline-secondary" for="rr-unit-nm" style="font-size:0.75rem;">nm</label>
+                    <input type="radio" class="btn-check" name="cfg-rr-units" id="rr-unit-mi" value="mi" autocomplete="off"
+                           onchange="rangeRingsUnits='mi'; drawRangeRings();">
+                    <label class="btn btn-outline-secondary" for="rr-unit-mi" style="font-size:0.75rem;">mi</label>
+                    <input type="radio" class="btn-check" name="cfg-rr-units" id="rr-unit-km" value="km" autocomplete="off"
+                           onchange="rangeRingsUnits='km'; drawRangeRings();">
+                    <label class="btn btn-outline-secondary" for="rr-unit-km" style="font-size:0.75rem;">km</label>
+                  </div>
+                  <label class="form-label mb-1 mt-2" style="font-size:0.82rem;">
+                    Opacity: <span id="cfg-range-rings-opacity-val">0.6</span>
+                  </label>
+                  <input type="range" class="form-range" id="cfg-range-rings-opacity"
+                         min="0.1" max="1" step="0.05" value="0.6"
+                         oninput="document.getElementById('cfg-range-rings-opacity-val').textContent=parseFloat(this.value).toFixed(2); rangeRingsOpacity=parseFloat(this.value); drawRangeRings();"/>
+                  <label class="form-label mb-1 mt-2" style="font-size:0.82rem;">Colour</label>
+                  <div class="d-flex align-items-center gap-2">
+                    <input type="color" class="form-control form-control-color form-control-sm p-0" id="cfg-range-rings-color"
+                           value="#4e8fd6" style="width:2.5rem;height:1.8rem;border:none;background:none;cursor:pointer;"
+                           oninput="rangeRingsColor=this.value; drawRangeRings();"/>
+                    <button class="btn btn-xs btn-outline-secondary" style="font-size:0.7rem;"
+                            onclick="document.getElementById('cfg-range-rings-color').value='#4e8fd6'; rangeRingsColor='#4e8fd6'; drawRangeRings();">Reset</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1251,17 +1331,6 @@
                     <span style="color:#8899aa;font-size:0.72rem;display:block;">Always alert on emergency transponder codes</span>
                   </label>
                 </div>
-              </div>
-              <div class="col-12">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="cfg-alerts-browser"/>
-                  <label class="form-check-label" for="cfg-alerts-browser">
-                    Browser notifications
-                  </label>
-                </div>
-                <button class="btn btn-xs btn-outline-secondary mt-1" style="font-size:0.7rem;" onclick="Notification.requestPermission()">
-                  Request permission
-                </button>
               </div>
               <div class="col-12">
                 <div class="form-check form-switch">
@@ -2038,6 +2107,7 @@ function connectWebSocket() {
     wsConnected = true;
     document.getElementById("nav-receiver-badge").className = "badge bg-success";
     document.getElementById("nav-receiver-badge").textContent = "LIVE";
+    wsSend("spectrum_subscribe", true);
   };
 
   ws.onclose = () => {
@@ -2116,9 +2186,22 @@ function connectWebSocket() {
         } else {
           spectrumPeak = spectrumPeak.map((p, i) => Math.max(p, spectrumData[i]));
         }
+        // Track noise floor from the bins themselves (median = noise, not signal)
+        // and slide the visible window so the floor sits 5 dB above the bottom.
+        // Smoothed 80/20 to avoid jitter frame-to-frame.
+        const sorted = [...spectrumData].sort((a, b) => a - b);
+        const median = sorted[sorted.length >> 1];
+        if (isFinite(median)) {
+          const targetMin = median - 5;
+          SPECTRUM_MIN_DB = SPECTRUM_MIN_DB * 0.8 + targetMin * 0.2;
+          SPECTRUM_MAX_DB = SPECTRUM_MIN_DB + SPECTRUM_DB_RANGE;
+        }
         const hint = document.getElementById("spectrum-tab-hint");
         if (hint) hint.textContent = `${sdata.bins.length} bins · ${(sdata.sample_rate / 1e6).toFixed(0)} MHz BW · live`;
+        const sp = document.getElementById("spectrum-panel");
+        if (sp && sp.style.display === "none" && !document.body.classList.contains("history-active")) sp.style.display = "";
         requestAnimationFrame(drawSpectrum);
+        pushWaterfallRow(spectrumData);
         break;
       }
       case "signal_quality_update": {
@@ -2201,8 +2284,9 @@ fetch("/api/aircraft")
 // ============================================================
 // SPECTRUM
 // ============================================================
-const SPECTRUM_MIN_DB = -80;
-const SPECTRUM_MAX_DB = -10;
+const SPECTRUM_DB_RANGE = 10;   // total visible range in dB
+let SPECTRUM_MIN_DB = -45;       // tracks noise floor (updated from signal_quality)
+let SPECTRUM_MAX_DB = SPECTRUM_MIN_DB + SPECTRUM_DB_RANGE;
 let spectrumData = null;
 let spectrumPeak = null;
 let peakDecayTimer = null;
@@ -2239,7 +2323,8 @@ function drawSpectrumOnCanvas(canvas) {
   ctx.font = "9px monospace";
   ctx.fillStyle = "#556677";
   ctx.textAlign = "right";
-  for (let db = SPECTRUM_MIN_DB; db <= SPECTRUM_MAX_DB; db += 10) {
+  const gridStart = Math.ceil(SPECTRUM_MIN_DB / 10) * 10;
+  for (let db = gridStart; db <= SPECTRUM_MAX_DB; db += 10) {
     const y = dbToY(db);
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + plotW, y); ctx.stroke();
     ctx.fillText(`${db}`, PAD.left - 3, y + 3);
@@ -2298,7 +2383,65 @@ function drawSpectrumOnCanvas(canvas) {
 }
 
 function drawSpectrum() {
-  drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+  if (_specModalOpen) drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-tab"));
+  if (_specPanelOpen) drawSpectrumOnCanvas(document.getElementById("spectrum-canvas-main"));
+}
+
+// ----- Waterfall -----
+// Scrolling history of spectrum rows. We keep the pixel buffer as an offscreen
+// canvas and blit it up by one row per new spectrum frame. Colour map is the
+// classic dark-blue → cyan → yellow → red heat ramp.
+const _wfState = new Map();
+function waterfallColor(db) {
+  const t = Math.max(0, Math.min(1,
+    (db - SPECTRUM_MIN_DB) / (SPECTRUM_MAX_DB - SPECTRUM_MIN_DB)));
+  let r, g, b;
+  if (t < 0.25)      { const k = t / 0.25;          r = 0;           g = 0;           b = Math.round(60 + 195 * k); }
+  else if (t < 0.5)  { const k = (t - 0.25) / 0.25; r = 0;           g = Math.round(220 * k); b = 255; }
+  else if (t < 0.75) { const k = (t - 0.5) / 0.25;  r = Math.round(255 * k); g = 220; b = Math.round(255 * (1 - k)); }
+  else               { const k = (t - 0.75) / 0.25;  r = 255;        g = Math.round(220 * (1 - k)); b = 0; }
+  return (r << 16) | (g << 8) | b;
+}
+function _pushWaterfallCanvas(canvas, bins) {
+  if (!canvas || canvas.offsetParent === null) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (!W || !H) return;
+  const pxW = Math.floor(W * dpr);
+  const pxH = Math.floor(H * dpr);
+  let st = _wfState.get(canvas.id);
+  if (!st || canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW; canvas.height = pxH;
+    const off = document.createElement("canvas");
+    off.width = pxW; off.height = pxH;
+    st = { off };
+    _wfState.set(canvas.id, st);
+  }
+  const off = st.off.getContext("2d");
+  off.drawImage(st.off, 0, 1);
+  const row = off.createImageData(pxW, 1);
+  const data = row.data;
+  const binCount = bins.length;
+  for (let x = 0; x < pxW; x++) {
+    const bi = Math.min(binCount - 1, Math.floor(x * binCount / pxW));
+    const c = waterfallColor(bins[bi]);
+    const i = x * 4;
+    data[i] = (c >> 16) & 0xff; data[i+1] = (c >> 8) & 0xff; data[i+2] = c & 0xff; data[i+3] = 255;
+  }
+  off.putImageData(row, 0, 0);
+  canvas.getContext("2d").drawImage(st.off, 0, 0);
+}
+function pushWaterfallRow(bins) {
+  if (!bins || !bins.length) return;
+  if (_specModalOpen) _pushWaterfallCanvas(document.getElementById("waterfall-canvas-tab"), bins);
+  if (_specPanelOpen) _pushWaterfallCanvas(document.getElementById("waterfall-canvas-main"), bins);
+}
+function resetWaterfall() {
+  _wfState.clear();
+  for (const id of ["waterfall-canvas-tab", "waterfall-canvas-main"]) {
+    const c = document.getElementById(id);
+    if (c) { const ctx = c.getContext("2d"); ctx.fillStyle = "#05080c"; ctx.fillRect(0, 0, c.width, c.height); }
+  }
 }
 
 // Peak hold slow decay — drop 1 dB/s
@@ -2311,6 +2454,22 @@ setInterval(() => {
 setInterval(() => {
   if (selectedIcao && aircraft[selectedIcao]) fetchTrack(selectedIcao);
 }, 30000);
+
+// ============================================================
+// SPECTRUM PANEL (main page, desktop)
+// ============================================================
+let _specPanelOpen = false;
+let _specModalOpen = false;
+(function initSpectrumPanel() {
+  const panel = document.getElementById("spectrum-panel");
+  const toggle = document.getElementById("spectrum-panel-toggle");
+  const chevron = document.getElementById("spectrum-panel-chevron");
+  if (!toggle || !panel) return;
+  toggle.addEventListener("click", () => {
+    _specPanelOpen = panel.classList.toggle("collapsed") ? false : true;
+    chevron.style.transform = _specPanelOpen ? "" : "rotate(180deg)";
+  });
+})();
 
 // ============================================================
 // STATUS BAR
@@ -2402,6 +2561,15 @@ setInterval(() => {
           label = `${src}: Connecting...`;
         }
         setReceiverStatus(conn, label);
+        // Show/hide the RTL-SDR bias-tee toggle depending on what the
+        // receiver reports about the opened tuner. Only Blog V3/V4-style
+        // tuners (R820T/R828D) with a librtlsdr that exports
+        // rtlsdr_set_bias_tee get the switch.
+        const biasWrap = document.getElementById("cfg-rtlsdr-bias-tee-wrap");
+        if (biasWrap) {
+          const show = s.receiver.source === "rtlsdr" && s.receiver.bias_tee_supported === true;
+          biasWrap.style.display = show ? "" : "none";
+        }
         // Tooltip for receiver status item
         const rxItem = document.getElementById("status-item-receiver");
         if (rxItem) {
@@ -2511,12 +2679,19 @@ setInterval(() => {
         const cpuLbl  = document.getElementById("status-cpu");
         const memDot  = document.getElementById("dot-mem");
         const memLbl  = document.getElementById("status-mem");
-        const cpu = s.system.cpu_pct;
-        const mem = s.system.mem_used_mb;
+        const cpu      = s.system.cpu_pct;
+        const memUsed  = s.system.mem_used_mb;
+        const memTotal = s.system.mem_total_mb;
+        const memPct   = s.system.mem_pct != null ? s.system.mem_pct : (memTotal ? (memUsed / memTotal * 100) : 0);
         if (cpuDot) cpuDot.className = "dot " + (cpu > 80 ? "dot-red" : cpu > 60 ? "dot-yellow" : "dot-green");
         if (cpuLbl) cpuLbl.textContent = `CPU ${cpu.toFixed(0)}%`;
-        if (memDot) memDot.className = "dot " + (mem > 500 ? "dot-red" : mem > 200 ? "dot-yellow" : "dot-green");
-        if (memLbl) memLbl.textContent = `MEM ${mem} MB`;
+        if (memDot) memDot.className = "dot " + (memPct > 85 ? "dot-red" : memPct > 70 ? "dot-yellow" : "dot-green");
+        if (memLbl) {
+          const fmt = (mb) => mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+          memLbl.textContent = memTotal
+            ? `MEM ${memPct.toFixed(0)}% (${fmt(memUsed)} / ${fmt(memTotal)})`
+            : `MEM ${fmt(memUsed)}`;
+        }
       }
 
       // App Updates card — state only applied on explicit Check Now click
@@ -2556,6 +2731,7 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-rtlsdr-agc").checked  = cfg.receiver?.rtlsdr_agc || false;
   document.getElementById("cfg-rtlsdr-gain").value   = cfg.receiver?.rtlsdr_gain ?? 49.6;
   document.getElementById("cfg-rtlsdr-ppm").value    = cfg.receiver?.rtlsdr_ppm ?? 0;
+  document.getElementById("cfg-rtlsdr-bias-tee").checked = cfg.receiver?.rtlsdr_bias_tee || false;
   document.getElementById("cfg-hackrf-device").value = cfg.receiver?.hackrf_device_index ?? 0;
   document.getElementById("cfg-hackrf-lna").value    = cfg.receiver?.hackrf_lna_gain ?? 16;
   document.getElementById("cfg-hackrf-vga").value    = cfg.receiver?.hackrf_vga_gain ?? 20;
@@ -2597,6 +2773,13 @@ function loadSettingsForm(cfg) {
 
   document.getElementById("cfg-range-rings").checked = cfg.web?.range_rings || false;
   document.getElementById("cfg-range-rings-nm").value = cfg.web?.range_rings_nm || "25,50,100,150,200";
+  const rrUnits = cfg.web?.range_rings_units || "nm";
+  const rrUnitEl = document.getElementById(`rr-unit-${rrUnits}`);
+  if (rrUnitEl) rrUnitEl.checked = true;
+  const rrOp = cfg.web?.range_rings_opacity ?? 0.6;
+  document.getElementById("cfg-range-rings-opacity").value = rrOp;
+  document.getElementById("cfg-range-rings-opacity-val").textContent = parseFloat(rrOp).toFixed(2);
+  document.getElementById("cfg-range-rings-color").value = cfg.web?.range_rings_color || "#4e8fd6";
 
   const locMode = cfg.location?.mode || "none";
   document.getElementById("cfg-location-mode").value = locMode;
@@ -2609,7 +2792,6 @@ function loadSettingsForm(cfg) {
   // Alerts
   document.getElementById("cfg-alerts-enabled").checked = cfg.alerts?.enabled ?? true;
   document.getElementById("cfg-alerts-emergency").checked = cfg.alerts?.emergency_squawks ?? true;
-  document.getElementById("cfg-alerts-browser").checked = cfg.alerts?.browser_notifications || false;
   document.getElementById("cfg-alerts-autoselect").checked = cfg.alerts?.auto_select || false;
   renderAlertRules(cfg.alerts?.rules || []);
 
@@ -2821,7 +3003,7 @@ function refreshRtlsdrDevices() {
       }
       hint.textContent = `${data.length} device${data.length !== 1 ? "s" : ""} found`;
     })
-    .catch(() => { hint.textContent = "Enumeration unavailable (pyrtlsdr not installed?)"; });
+    .catch(() => { hint.textContent = "Enumeration unavailable (librtlsdr not found?)"; });
 }
 
 function updateAgcToggle() {
@@ -2878,8 +3060,12 @@ document.getElementById("settings-modal").addEventListener("show.bs.modal", () =
         amp: cfg.receiver?.hackrf_amp ?? false,
       };
       usrpGainOriginal = cfg.receiver?.usrp_gain ?? 40.0;
+      rangeRingsOpacityOriginal = rangeRingsOpacity;
+      rangeRingsColorOriginal = rangeRingsColor;
+      rangeRingsUnitsOriginal = rangeRingsUnits;
     });
-  wsSend("spectrum_subscribe", true);
+  _specModalOpen = true;
+  resetWaterfall();
   refreshDbStats();
 });
 
@@ -2908,7 +3094,7 @@ document.getElementById("btn-db-reset").addEventListener("click", () => {
 });
 
 document.getElementById("settings-modal").addEventListener("hide.bs.modal", () => {
-  wsSend("spectrum_subscribe", false);
+  _specModalOpen = false;
   if (gainSaving) {
     // Save was confirmed — preview values become the new saved values.
     gainPreviewActive = false;
@@ -2918,6 +3104,10 @@ document.getElementById("settings-modal").addEventListener("hide.bs.modal", () =
     cancelGainPreview();
     cancelHackrfGainPreview();
     cancelUsrpGainPreview();
+    rangeRingsOpacity = rangeRingsOpacityOriginal;
+    rangeRingsColor = rangeRingsColorOriginal;
+    rangeRingsUnits = rangeRingsUnitsOriginal;
+    drawRangeRings();
   }
   gainSaving = false;
   clearTimeout(gainPreviewTimer);
@@ -2951,6 +3141,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       rtlsdr_agc:            document.getElementById("cfg-rtlsdr-agc").checked,
       rtlsdr_gain:           parseFloat(document.getElementById("cfg-rtlsdr-gain").value),
       rtlsdr_ppm:            parseInt(document.getElementById("cfg-rtlsdr-ppm").value),
+      rtlsdr_bias_tee:       document.getElementById("cfg-rtlsdr-bias-tee").checked,
       hackrf_device_index:   parseInt(document.getElementById("cfg-hackrf-device").value),
       hackrf_lna_gain:       parseInt(document.getElementById("cfg-hackrf-lna").value),
       hackrf_vga_gain:       parseInt(document.getElementById("cfg-hackrf-vga").value),
@@ -2977,6 +3168,9 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
                  appConfig.web?.icon_type || "arrow",
       range_rings: document.getElementById("cfg-range-rings").checked,
       range_rings_nm: document.getElementById("cfg-range-rings-nm").value.trim(),
+      range_rings_units: document.querySelector('input[name="cfg-rr-units"]:checked')?.value || "nm",
+      range_rings_opacity: parseFloat(document.getElementById("cfg-range-rings-opacity").value),
+      range_rings_color: document.getElementById("cfg-range-rings-color").value,
     },
     servers: {
       sbs_enabled: document.getElementById("cfg-sbs-server-enabled").checked,
@@ -3001,7 +3195,6 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
     alerts: {
       enabled: document.getElementById("cfg-alerts-enabled").checked,
       emergency_squawks: document.getElementById("cfg-alerts-emergency").checked,
-      browser_notifications: document.getElementById("cfg-alerts-browser").checked,
       auto_select: document.getElementById("cfg-alerts-autoselect").checked,
       rules: collectAlertRules(),
     },
@@ -3025,6 +3218,9 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       refreshAllMarkers();
       rangeRingsEnabled = payload.web.range_rings;
       rangeRingsNm = (payload.web.range_rings_nm || "").split(",").map(Number).filter(n => n > 0);
+      rangeRingsUnits = payload.web.range_rings_units || "nm";
+      rangeRingsOpacity = payload.web.range_rings_opacity ?? 0.6;
+      rangeRingsColor = payload.web.range_rings_color || "#4e8fd6";
       drawRangeRings();
       aircraftTTL = payload.aircraft_ttl;
       alertConfig = payload.alerts;
@@ -3236,6 +3432,12 @@ let sensorMarker = null;
 let rangeRingsLayer = L.layerGroup();
 let rangeRingsEnabled = {{ 'true' if config.web.range_rings else 'false' }};
 let rangeRingsNm = "{{ config.web.range_rings_nm }}".split(",").map(Number).filter(n => n > 0);
+let rangeRingsOpacity = {{ config.web.range_rings_opacity | default(0.6) }};
+let rangeRingsOpacityOriginal = rangeRingsOpacity;
+let rangeRingsColor = "{{ config.web.range_rings_color | default('#4e8fd6') }}";
+let rangeRingsColorOriginal = rangeRingsColor;
+let rangeRingsUnits = "{{ config.web.range_rings_units | default('nm') }}";
+let rangeRingsUnitsOriginal = rangeRingsUnits;
 let sensorLat = null, sensorLon = null;
 
 function drawRangeRings() {
@@ -3245,21 +3447,23 @@ function drawRangeRings() {
     return;
   }
   rangeRingsLayer.addTo(map);
-  const NM = 1852;
+  const METERS = rangeRingsUnits === "km" ? 1000 : rangeRingsUnits === "mi" ? 1609.344 : 1852;
   for (const nm of rangeRingsNm) {
     L.circle([sensorLat, sensorLon], {
-      radius: nm * NM, color: "#4e8fd6", weight: 1.5,
-      fillOpacity: 0, opacity: 0.6, dashArray: "8,5", interactive: false,
+      radius: nm * METERS, color: rangeRingsColor, weight: 1.5,
+      fillOpacity: 0, opacity: rangeRingsOpacity, dashArray: "8,5", interactive: false,
     }).addTo(rangeRingsLayer);
-    const labelLat = sensorLat + (nm * NM) / 111320;
-    L.marker([labelLat, sensorLon], {
-      icon: L.divIcon({
-        className: "range-ring-label",
-        html: `<span>${nm} nm</span>`,
-        iconSize: [50, 16], iconAnchor: [25, 8],
-      }),
-      interactive: false,
-    }).addTo(rangeRingsLayer);
+    const latOffset = (nm * METERS) / 111320;
+    for (const lat of [sensorLat + latOffset, sensorLat - latOffset]) {
+      L.marker([lat, sensorLon], {
+        icon: L.divIcon({
+          className: "range-ring-label",
+          html: `<span>${nm} ${rangeRingsUnits}</span>`,
+          iconSize: [60, 16], iconAnchor: [30, 8],
+        }),
+        interactive: false,
+      }).addTo(rangeRingsLayer);
+    }
   }
 }
 
@@ -3328,7 +3532,6 @@ document.getElementById("btn-add-receiver").addEventListener("click", () => {
 // ============================================================
 let alertConfig = {
   enabled: {{ 'true' if config.alerts.enabled else 'false' }},
-  browser_notifications: {{ 'true' if config.alerts.browser_notifications else 'false' }},
   auto_select: {{ 'true' if config.alerts.auto_select else 'false' }},
   emergency_squawks: {{ 'true' if config.alerts.emergency_squawks else 'false' }},
   rules: {{ config.alerts.rules | tojson }},
@@ -3414,9 +3617,6 @@ function fireAlert(ac, label) {
 
   showToast(`Alert: ${title}${body ? " — " + body : ""}`, "danger");
 
-  if (alertConfig.browser_notifications && Notification.permission === "granted") {
-    new Notification(title, { body, icon: "/static/tile-sw.js", silent: false });
-  }
 }
 
 // Alert rule UI helpers
@@ -3500,14 +3700,9 @@ document.getElementById("stats-modal").addEventListener("show.bs.modal", () => {
     hourDiv.innerHTML = d.hourly_histogram.map(h => {
       const pct = (h.count / hourMax * 100).toFixed(1);
       return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${h.label}: ${h.count} aircraft">
-        <div style="width:100%;background:#4e8fd6;border-radius:2px 2px 0 0;min-height:1px;" style="height:${pct}%"></div>
+        <div style="width:100%;background:#4e8fd6;border-radius:2px 2px 0 0;min-height:1px;height:${pct}%"></div>
       </div>`;
     }).join("");
-    // Fix: set height via style attribute properly
-    hourDiv.querySelectorAll("div > div").forEach((bar, i) => {
-      const pct = (d.hourly_histogram[i].count / hourMax * 100).toFixed(1);
-      bar.style.height = pct + "%";
-    });
 
     // Category breakdown
     const catDiv = document.getElementById("stats-category");
@@ -3904,6 +4099,8 @@ function restartApp() {
     document.body.classList.add("history-active");
     document.getElementById("btn-history-mode").classList.add("active","btn-info");
     document.getElementById("btn-history-mode").classList.remove("btn-outline-secondary");
+    const sp = document.getElementById("spectrum-panel");
+    if (sp) sp.style.display = "none";
     // Hide live aircraft markers and sensor marker
     for (const m of Object.values(markers)) map.removeLayer(m);
     if (sensorMarker) map.removeLayer(sensorMarker);
@@ -3955,6 +4152,8 @@ function restartApp() {
     histActive = false;
     histData   = {};
     document.body.classList.remove("history-active");
+    const sp = document.getElementById("spectrum-panel");
+    if (sp && spectrumData) sp.style.display = "";
     document.getElementById("btn-history-mode").classList.remove("active","btn-info");
     document.getElementById("btn-history-mode").classList.add("btn-outline-secondary");
     document.getElementById("hist-ac-badge").classList.add("d-none");
@@ -4055,8 +4254,7 @@ function restartApp() {
   }
 
   function getTrailPoints(pts, ts) {
-    const trailStart = ts - TRAIL_SEC;
-    return pts.filter(p => p.ts >= trailStart && p.ts <= ts).map(p => [p.lat, p.lon]);
+    return pts.filter(p => p.ts <= ts).map(p => [p.lat, p.lon]);
   }
 
   function histPopupHtml(icao, pos) {

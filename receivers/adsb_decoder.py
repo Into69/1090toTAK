@@ -53,6 +53,40 @@ _SYNDROME_56 = _build_syndrome_table(56)
 _SYNDROME_112 = _build_syndrome_table(112)
 
 
+def _build_two_bit_syndrome_table(total_bits: int) -> dict:
+    """
+    Pre-compute {syndrome: (bit_pos_a, bit_pos_b)} for every pair of payload
+    bit flips. Colliding syndromes are skipped — if two different pairs
+    produce the same syndrome, neither is correctable unambiguously, so we
+    drop both to keep the false-correction rate low.
+    """
+    payload_bits = total_bits - 24
+    hex_len = total_bits // 4
+    table: dict = {}
+    collisions: set = set()
+    for i in range(payload_bits):
+        vi = 1 << (total_bits - 1 - i)
+        for j in range(i + 1, payload_bits):
+            vj = 1 << (total_bits - 1 - j)
+            hex_str = format(vi ^ vj, f"0{hex_len}X")
+            syndrome = _crc_remainder(hex_str)
+            if syndrome == 0:
+                continue
+            if syndrome in collisions:
+                continue
+            if syndrome in table:
+                collisions.add(syndrome)
+                del table[syndrome]
+                continue
+            table[syndrome] = (i, j)
+    return table
+
+
+# Pre-computed 2-bit syndrome tables (only built once at import time)
+_SYNDROME_56_2  = _build_two_bit_syndrome_table(56)
+_SYNDROME_112_2 = _build_two_bit_syndrome_table(112)
+
+
 def crc_ok(msg: str) -> bool:
     """
     Return True if the 24-bit CRC embedded in the last 3 bytes is valid.
@@ -82,6 +116,36 @@ def fix_single_bit(msg: str) -> Optional[str]:
     val = int(msg, 16)
     val ^= 1 << (total_bits - 1 - bit_pos)
     return format(val, f"0{len(msg)}X")
+
+
+def fix_two_bit(msg: str) -> Optional[str]:
+    """
+    Attempt two-bit error correction using pre-computed syndrome lookup.
+    Higher false-positive risk than single-bit correction — colliding
+    syndromes were dropped from the table but the remaining ones can still
+    match garbage frames, so the caller should sanity-check DF/ICAO on
+    anything this returns.
+    """
+    total_bits = len(msg) * 4
+    table = {56: _SYNDROME_56_2, 112: _SYNDROME_112_2}.get(total_bits)
+    if table is None:
+        return None
+    syndrome = _crc_remainder(msg)
+    if syndrome == 0:
+        return msg
+    pair = table.get(syndrome)
+    if pair is None:
+        return None
+    i, j = pair
+    val = int(msg, 16)
+    val ^= (1 << (total_bits - 1 - i)) | (1 << (total_bits - 1 - j))
+    corrected = format(val, f"0{len(msg)}X")
+    # Basic sanity filter — 2-bit correction has false-positive risk, so
+    # reject anything that isn't a plausible Mode S downlink format.
+    df_byte = int(corrected[:2], 16) >> 3
+    if df_byte not in (0, 4, 5, 11, 16, 17, 18, 20, 21, 24):
+        return None
+    return corrected
 
 
 # ---------------------------------------------------------------------------

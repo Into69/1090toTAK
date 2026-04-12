@@ -264,7 +264,7 @@ class AVRReceiver(BaseReceiver):
         if not self._position_plausible(lat, lon, t, icao):
             return
 
-        log.info("Position decoded icao=%s lat=%.4f lon=%.4f alt=%s", icao, lat, lon, alt)
+        log.debug("Position decoded icao=%s lat=%.4f lon=%.4f alt=%s", icao, lat, lon, alt)
         self.registry.update(icao, lat=lat, lon=lon, altitude=alt)
 
     def _get_cpr_reference(self, icao: str, t: float):

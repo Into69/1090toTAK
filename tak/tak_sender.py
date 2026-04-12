@@ -51,8 +51,13 @@ class TAKSender:
             self._send_all()
 
     def _send_all(self) -> None:
+        import time as _time
         aircraft_list = self.registry.get_all()
-        positioned = [a for a in aircraft_list if a.has_position()]
+        now = _time.time()
+        positioned = [
+            a for a in aircraft_list
+            if a.has_position() and (now - a.last_position) <= self.config.aircraft_ttl
+        ]
         if not positioned:
             return
 

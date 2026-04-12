@@ -213,10 +213,13 @@ class AircraftStore:
     def category_breakdown(self) -> list:
         with self._lock:
             rows = self._conn.execute(
-                """SELECT COALESCE(category, 'Unknown') as cat, COUNT(DISTINCT icao) as count
-                   FROM positions GROUP BY cat ORDER BY count DESC"""
+                """SELECT COALESCE(category, 'Unknown') AS category,
+                          COUNT(DISTINCT icao) AS cnt
+                   FROM positions
+                   GROUP BY 1
+                   ORDER BY 2 DESC"""
             ).fetchall()
-        return [{"category": r["cat"], "count": r["count"]} for r in rows]
+        return [{"category": r["category"], "count": r["cnt"]} for r in rows]
 
     # ------------------------------------------------------------------
     # Purge

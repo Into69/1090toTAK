@@ -61,6 +61,9 @@ class JSONReceiver(BaseReceiver):
         self._last_location_fetch: float = 0.0
         self._logged_connected: bool = False
         self.last_error: str = ""
+        self.spectrum: list = []
+        self._spectrum_center: int = 0
+        self._spectrum_sample_rate: int = 0
 
     def run(self) -> None:
         host = self.config.receiver.host
@@ -90,6 +93,7 @@ class JSONReceiver(BaseReceiver):
                 if first_error:
                     log.warning("JSON: poll error at http://%s:%d/data/aircraft.json: %s",
                                 self.config.receiver.host, self.config.receiver.json_port, e)
+            self._fetch_spectrum()
             # Periodically refresh receiver location
             if time.time() - self._last_location_fetch > self.LOCATION_REFRESH:
                 self._fetch_receiver_location()
@@ -191,10 +195,30 @@ class JSONReceiver(BaseReceiver):
                 self.registry.update(icao)
                 self.rejected_count += 1
 
+    def _fetch_spectrum(self) -> None:
+        host = self.config.receiver.host
+        port = self.config.receiver.json_port
+        url = f"http://{host}:{port}/data/spectrum.json"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                data = json.loads(resp.read())
+            bins = data.get("bins")
+            if bins and len(bins) > 0:
+                self.spectrum = bins
+                self._spectrum_center = data.get("center_freq", 0)
+                self._spectrum_sample_rate = data.get("sample_rate", 0)
+            else:
+                self.spectrum = []
+        except Exception:
+            self.spectrum = []
+
     def status(self) -> dict:
         s = super().status()
         s["url"]        = f"http://{self.config.receiver.host}:{self.config.receiver.json_port}/data/aircraft.json"
         s["polls"]      = self.poll_count
         s["rejected"]   = self.rejected_count
         s["last_error"] = self.last_error
+        if self.spectrum:
+            s["sample_rate"] = self._spectrum_sample_rate
+            s["frequency"]   = self._spectrum_center
         return s

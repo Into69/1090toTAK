@@ -20,11 +20,93 @@ Options:
 
 import argparse
 import logging
+import socket
+import subprocess
 import sys
 import os
+import time
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(__file__))
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    bind_host = "" if host in ("0.0.0.0", "::", "") else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((bind_host, port))
+        except OSError:
+            return True
+    return False
+
+
+def _pids_on_port(port: int) -> list:
+    """Return list of PIDs listening on the given TCP port (Windows/Linux/macOS)."""
+    pids = set()
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["netstat", "-ano", "-p", "TCP"],
+                capture_output=True, text=True, check=False,
+            ).stdout
+            needle = f":{port}"
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[0] == "TCP" and parts[1].endswith(needle) \
+                        and parts[3] == "LISTENING":
+                    try:
+                        pids.add(int(parts[4]))
+                    except ValueError:
+                        pass
+        else:
+            out = subprocess.run(
+                ["lsof", "-tiTCP:%d" % port, "-sTCP:LISTEN"],
+                capture_output=True, text=True, check=False,
+            ).stdout
+            for line in out.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pids.add(int(line))
+    except FileNotFoundError:
+        pass
+    return sorted(pids)
+
+
+def _kill_pid(pid: int) -> bool:
+    try:
+        if sys.platform == "win32":
+            rc = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True, text=True, check=False,
+            ).returncode
+            return rc == 0
+        else:
+            os.kill(pid, 9)
+            return True
+    except Exception:
+        return False
+
+
+def free_port(host: str, port: int, log: logging.Logger) -> None:
+    """If `port` is in use, locate the listening process and kill it."""
+    if not _port_in_use(host, port):
+        return
+    my_pid = os.getpid()
+    pids = [p for p in _pids_on_port(port) if p != my_pid]
+    if not pids:
+        log.warning("Port %d is in use but no owning PID found — startup may fail", port)
+        return
+    for pid in pids:
+        log.warning("Port %d is held by PID %d — killing it", port, pid)
+        if not _kill_pid(pid):
+            log.error("Failed to kill PID %d — you may need to kill it manually", pid)
+    # Give the OS a moment to release the socket
+    for _ in range(20):
+        if not _port_in_use(host, port):
+            return
+        time.sleep(0.1)
+    log.warning("Port %d still in use after kill attempt", port)
 
 
 def parse_args():
@@ -136,6 +218,8 @@ def main():
 
     log.info("Web UI: http://localhost:%d", config.web.port)
     log.info("Press Ctrl+C to stop")
+
+    free_port(config.web.host, config.web.port, log)
 
     import uvicorn
     try:

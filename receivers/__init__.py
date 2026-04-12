@@ -19,8 +19,11 @@ def build_receiver(config: AppConfig, registry: AircraftRegistry) -> BaseReceive
     elif t == RECEIVER_RTLSDR:
         if not HAS_RTLSDR:
             log.warning(
-                "pyrtlsdr is not installed — RTL-SDR receiver unavailable. "
-                "Falling back to SBS. Install with: pip install pyrtlsdr"
+                "librtlsdr not found — RTL-SDR receiver unavailable. "
+                "Falling back to SBS. Install the system library:\n"
+                "  Windows: place rtlsdr.dll on PATH or in project root\n"
+                "  Linux:   sudo apt install librtlsdr-dev\n"
+                "  macOS:   brew install librtlsdr"
             )
             return SBSReceiver(registry, config)
         from .rtlsdr_receiver import RTLSDRReceiver

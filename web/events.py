@@ -76,12 +76,13 @@ async def _spectrum_loop(receiver):
                 r = getattr(receiver, "_receiver", receiver)
                 spec = getattr(r, "spectrum", None)
             if spec:
+                st = r.status() if hasattr(r, "status") else {}
                 msg = {
                     "type": "spectrum_update",
                     "data": {
                         "bins": [round(v, 1) for v in spec],
-                        "center_freq": 1_090_000_000,
-                        "sample_rate": 2_000_000,
+                        "center_freq": st.get("frequency", 1_090_000_000),
+                        "sample_rate": st.get("sample_rate", 2_000_000),
                     },
                 }
                 # Send only to spectrum subscribers

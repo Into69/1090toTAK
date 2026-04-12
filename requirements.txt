@@ -6,7 +6,10 @@ pyModeS>=2.14
 psutil>=5.9.0
 
 # Optional — SDR hardware receivers (install only what you need)
-# pip install pyrtlsdr numpy   # RTL-SDR dongle
+# RTL-SDR dongle — only numpy needed; librtlsdr system library required:
+#   Windows: place rtlsdr.dll on PATH or in project root
+#   Linux:   sudo apt install librtlsdr-dev
+#   macOS:   brew install librtlsdr
 # pip install hackrf numpy     # HackRF One
 # uhd — USRP B205mini/B206mini support. Typically installed via system package:
 #   Ubuntu/Debian: sudo apt install python3-uhd

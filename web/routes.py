@@ -12,6 +12,16 @@ from capabilities import HAS_RTLSDR, HAS_HACKRF, HAS_UHD, probe_gpsd
 
 log = logging.getLogger(__name__)
 
+# Initialise psutil for system-wide CPU/memory stats. cpu_percent(interval=None)
+# needs one priming call before it returns meaningful values on Linux.
+try:
+    import psutil as _psutil
+    _psutil.cpu_percent(interval=None)      # prime the system-wide counter
+    _HAS_PSUTIL = True
+except Exception:
+    _psutil = None
+    _HAS_PSUTIL = False
+
 _web_dir = Path(__file__).parent
 
 
@@ -102,6 +112,25 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             entry["lon"] = loc.lon
         return entry
 
+    @router.get("/data/spectrum.json")
+    def spectrum_json():
+        """Serve current spectrum data for remote JSON consumers."""
+        rx = receiver
+        if hasattr(rx, "_receivers"):
+            for r in rx._receivers.values():
+                if getattr(r, "spectrum", None):
+                    rx = r
+                    break
+        spec = getattr(rx, "spectrum", None) if rx else None
+        if not spec:
+            return {"bins": [], "center_freq": 0, "sample_rate": 0}
+        st = rx.status() if hasattr(rx, "status") else {}
+        return {
+            "bins": [round(v, 1) for v in spec],
+            "center_freq": st.get("frequency", 1_090_000_000),
+            "sample_rate": st.get("sample_rate", 2_000_000),
+        }
+
     @router.get("/api/stats")
     def get_stats():
         from config import config_to_dict
@@ -123,15 +152,14 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             **web_client_status(),
         }
         stats["update"] = _get_update_state()
-        try:
-            import os as _os, psutil as _psutil
-            _proc = _psutil.Process(_os.getpid())
+        if _HAS_PSUTIL:
+            vm = _psutil.virtual_memory()
             stats["system"] = {
-                "cpu_pct":    _proc.cpu_percent(interval=None),
-                "mem_used_mb": _proc.memory_info().rss >> 20,
+                "cpu_pct":      _psutil.cpu_percent(interval=None),
+                "mem_used_mb":  vm.used  >> 20,
+                "mem_total_mb": vm.total >> 20,
+                "mem_pct":      vm.percent,
             }
-        except Exception:
-            pass
         return stats
 
     @router.get("/api/config")
@@ -195,12 +223,15 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         if not HAS_RTLSDR:
             return []
         try:
-            from rtlsdr import librtlsdr
-            count = librtlsdr.rtlsdr_get_device_count()
+            try:
+                from receivers.rtlsdr_ctypes import _lib as _rtl_lib
+            except (ImportError, OSError):
+                from rtlsdr import librtlsdr as _rtl_lib
+            count = _rtl_lib.rtlsdr_get_device_count()
             devices = []
             for i in range(count):
                 try:
-                    name = librtlsdr.rtlsdr_get_device_name(i)
+                    name = _rtl_lib.rtlsdr_get_device_name(i)
                     if isinstance(name, bytes):
                         name = name.decode("utf-8", errors="replace")
                     name = name.strip() or f"RTL-SDR Device {i}"
