@@ -3553,15 +3553,46 @@ function _applyRainViewerTiles() {
   // RainViewer tile URL: {host}{path}/256/{z}/{x}/{y}/2/1_1.png
   // color scheme 2 (universal blue), smooth=1, snow=1
   const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}/2/1_1.png";
+  // 1x1 transparent PNG to replace any "zoom level not supported" tiles
+  const blankTile = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   weatherTileLayer = L.tileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
-    maxNativeZoom: 8,    // RainViewer radar tiles serve "not supported" past ~z=8; Leaflet upsamples beyond
+    maxNativeZoom: 7,    // RainViewer radar coverage degrades past z=7 in many regions
     minNativeZoom: 0,
+    errorTileUrl: blankTile,
     attribution: '\u00a9 RainViewer',
     pane: "overlayPane",
     tileSize: 256,
+    crossOrigin: "anonymous",   // needed so the canvas below isn't security-tainted
   }).addTo(map);
+  // RainViewer returns a "not supported" PNG with 200 OK for unsupported tiles (not a 404),
+  // so errorTileUrl alone won't catch it. Intercept on load and blank those tiles.
+  weatherTileLayer.on("tileload", function (e) {
+    const img = e.tile;
+    // RainViewer's "not supported" tile is ~2-3KB; valid tiles vary but the error image
+    // has a distinctive small size. naturalWidth/Height are 256 either way, so we can't
+    // distinguish by dimensions. Instead, draw to a canvas and sample a known pixel.
+    try {
+      if (img.complete && img.naturalWidth === 256) {
+        const c = document.createElement("canvas");
+        c.width = 256; c.height = 256;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        // "Zoom level not supported" text sits near center; sample a cluster of pixels
+        // that would be text-colored (white/grey) on dark background
+        const d = ctx.getImageData(100, 120, 56, 16).data;
+        let textPixels = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          // The error tile uses light grey text ~(180,180,180) with full alpha
+          if (d[i] > 150 && d[i+1] > 150 && d[i+2] > 150 && d[i+3] > 200) textPixels++;
+        }
+        if (textPixels > 20) {
+          img.src = blankTile;
+        }
+      }
+    } catch (err) { /* CORS-tainted canvas: ignore */ }
+  });
 }
 
 function _fetchRainViewer(gen) {
