@@ -74,6 +74,9 @@ class WebConfig:
     range_rings_opacity: float = 0.6
     range_rings_color: str = "#4e8fd6"
     range_rings_units: str = "nm"
+    weather_overlay: bool = False
+    weather_layer: str = "radar"           # radar | satellite
+    weather_opacity: float = 0.5
 
 
 @dataclass

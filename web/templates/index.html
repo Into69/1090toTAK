@@ -1139,6 +1139,43 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Weather Overlay -->
+              <div class="col-12 mt-2">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-weather-overlay"/>
+                  <label class="form-check-label" for="cfg-weather-overlay">
+                    Weather Overlay
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                      Live weather radar from OpenWeatherMap (requires free API key)
+                    </span>
+                  </label>
+                </div>
+                <div id="cfg-weather-row" style="margin-top:0.5rem;">
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    <span id="weather-status-badge" class="badge bg-secondary" style="font-size:0.65rem;white-space:nowrap;">--</span>
+                    <button type="button" id="weather-retry-btn" class="btn btn-link btn-sm p-0" title="Retry connection"
+                            style="font-size:0.7rem;color:#8899aa;display:none;" onclick="updateWeatherLayer();">
+                      <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                    <small style="font-size:0.68rem;color:#556677;margin-left:auto;">
+                      Powered by <span style="color:#4e8fd6;cursor:pointer;text-decoration:underline;"
+                        onclick="window.open('https://www.rainviewer.com','_blank')">RainViewer</span>
+                    </small>
+                  </div>
+                  <label class="form-label mb-1" style="font-size:0.82rem;">Layer</label>
+                  <select class="form-select form-select-sm" id="cfg-weather-layer">
+                    <option value="radar">Precipitation Radar</option>
+                    <option value="satellite">Satellite (Infrared)</option>
+                  </select>
+                  <label class="form-label mb-1 mt-2" style="font-size:0.82rem;">
+                    Opacity: <span id="cfg-weather-opacity-val">0.5</span>
+                  </label>
+                  <input type="range" class="form-range" id="cfg-weather-opacity"
+                         min="0.1" max="1" step="0.05" value="0.5"
+                         oninput="document.getElementById('cfg-weather-opacity-val').textContent=parseFloat(this.value).toFixed(2); weatherOpacity=parseFloat(this.value); if(weatherTileLayer) weatherTileLayer.setOpacity(weatherOpacity);"/>
+                </div>
+              </div>
             </div>
           </div>
           <div class="tab-pane fade" id="tab-servers">
@@ -2780,6 +2817,11 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-range-rings-opacity").value = rrOp;
   document.getElementById("cfg-range-rings-opacity-val").textContent = parseFloat(rrOp).toFixed(2);
   document.getElementById("cfg-range-rings-color").value = cfg.web?.range_rings_color || "#4e8fd6";
+  document.getElementById("cfg-weather-overlay").checked = cfg.web?.weather_overlay || false;
+  document.getElementById("cfg-weather-layer").value = cfg.web?.weather_layer || "radar";
+  const wxOp = cfg.web?.weather_opacity ?? 0.5;
+  document.getElementById("cfg-weather-opacity").value = wxOp;
+  document.getElementById("cfg-weather-opacity-val").textContent = wxOp.toFixed(2);
 
   const locMode = cfg.location?.mode || "none";
   document.getElementById("cfg-location-mode").value = locMode;
@@ -3171,6 +3213,9 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       range_rings_units: document.querySelector('input[name="cfg-rr-units"]:checked')?.value || "nm",
       range_rings_opacity: parseFloat(document.getElementById("cfg-range-rings-opacity").value),
       range_rings_color: document.getElementById("cfg-range-rings-color").value,
+      weather_overlay: document.getElementById("cfg-weather-overlay").checked,
+      weather_layer: document.getElementById("cfg-weather-layer").value,
+      weather_opacity: parseFloat(document.getElementById("cfg-weather-opacity").value),
     },
     servers: {
       sbs_enabled: document.getElementById("cfg-sbs-server-enabled").checked,
@@ -3222,6 +3267,10 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       rangeRingsOpacity = payload.web.range_rings_opacity ?? 0.6;
       rangeRingsColor = payload.web.range_rings_color || "#4e8fd6";
       drawRangeRings();
+      weatherEnabled = payload.web.weather_overlay;
+      weatherLayerType = payload.web.weather_layer || "radar";
+      weatherOpacity = payload.web.weather_opacity ?? 0.5;
+      updateWeatherLayer();
       aircraftTTL = payload.aircraft_ttl;
       alertConfig = payload.alerts;
       showToast("Settings saved", "success");
@@ -3468,6 +3517,110 @@ function drawRangeRings() {
 }
 
 // ============================================================
+// WEATHER OVERLAY
+// ============================================================
+let weatherEnabled = {{ 'true' if config.web.weather_overlay else 'false' }};
+let weatherLayerType = "{{ config.web.weather_layer | default('radar') }}";
+let weatherOpacity = {{ config.web.weather_opacity | default(0.5) }};
+let weatherTileLayer = null;
+let weatherRefreshTimer = null;
+let _wxGeneration = 0;
+let _rvHost = "";   // RainViewer tile host (from API)
+let _rvPath = "";   // latest radar or satellite path
+
+function setWeatherStatus(status, text) {
+  const badge = document.getElementById("weather-status-badge");
+  if (!badge) return;
+  badge.textContent = text;
+  badge.className = "badge " + ({
+    ok:      "bg-success",
+    error:   "bg-danger",
+    loading: "bg-warning text-dark",
+    off:     "bg-secondary",
+  }[status] || "bg-secondary");
+  badge.style.fontSize = "0.65rem";
+  badge.style.whiteSpace = "nowrap";
+  const retry = document.getElementById("weather-retry-btn");
+  if (retry) retry.style.display = status === "ok" ? "none" : "inline";
+}
+
+function _applyRainViewerTiles() {
+  if (weatherTileLayer) {
+    map.removeLayer(weatherTileLayer);
+    weatherTileLayer = null;
+  }
+  if (!_rvHost || !_rvPath) return;
+  // RainViewer tile URL: {host}{path}/256/{z}/{x}/{y}/2/1_1.png
+  // color scheme 2 (universal blue), smooth=1, snow=1
+  const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}/2/1_1.png";
+  weatherTileLayer = L.tileLayer(url, {
+    opacity: weatherOpacity,
+    maxZoom: 19,
+    maxNativeZoom: 8,    // RainViewer radar tiles serve "not supported" past ~z=8; Leaflet upsamples beyond
+    minNativeZoom: 0,
+    attribution: '\u00a9 RainViewer',
+    pane: "overlayPane",
+    tileSize: 256,
+  }).addTo(map);
+}
+
+function _fetchRainViewer(gen) {
+  fetch("https://api.rainviewer.com/public/weather-maps.json")
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => {
+      if (gen !== _wxGeneration) return;
+      _rvHost = data.host || "https://tilecache.rainviewer.com";
+      if (weatherLayerType === "satellite") {
+        const ir = data.satellite?.infrared;
+        _rvPath = ir && ir.length ? ir[ir.length - 1].path : "";
+      } else {
+        const past = data.radar?.past;
+        _rvPath = past && past.length ? past[past.length - 1].path : "";
+      }
+      if (!_rvPath) {
+        setWeatherStatus("error", "No data available");
+        return;
+      }
+      _applyRainViewerTiles();
+      setWeatherStatus("ok", "Connected");
+    })
+    .catch(err => {
+      if (gen === _wxGeneration) setWeatherStatus("error", "Network error");
+    });
+}
+
+function updateWeatherLayer() {
+  if (weatherTileLayer) {
+    map.removeLayer(weatherTileLayer);
+    weatherTileLayer = null;
+  }
+  if (weatherRefreshTimer) {
+    clearInterval(weatherRefreshTimer);
+    weatherRefreshTimer = null;
+  }
+  if (!weatherEnabled) {
+    setWeatherStatus("off", "Off");
+    return;
+  }
+  setWeatherStatus("loading", "Connecting...");
+  const gen = ++_wxGeneration;
+  _fetchRainViewer(gen);
+  // Re-fetch every 10 minutes to get the latest radar frame
+  weatherRefreshTimer = setInterval(() => _fetchRainViewer(_wxGeneration), 600_000);
+}
+
+updateWeatherLayer();
+
+document.getElementById("cfg-weather-overlay")?.addEventListener("change", function () {
+  weatherEnabled = this.checked;
+  weatherLayerType = document.getElementById("cfg-weather-layer").value;
+  updateWeatherLayer();
+});
+document.getElementById("cfg-weather-layer")?.addEventListener("change", function () {
+  weatherLayerType = this.value;
+  if (weatherEnabled) updateWeatherLayer();
+});
+
 // ============================================================
 // MULTI-RECEIVER UI
 // ============================================================
