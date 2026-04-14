@@ -1147,7 +1147,7 @@
                   <label class="form-check-label" for="cfg-weather-overlay">
                     Weather Overlay
                     <span style="color:#8899aa;font-size:0.72rem;display:block;">
-                      Live weather radar from OpenWeatherMap (requires free API key)
+                      Live weather tiles — RainViewer radar, NASA GIBS satellite IR, or OpenWeatherMap layers (API key required)
                     </span>
                   </label>
                 </div>
@@ -1158,16 +1158,32 @@
                             style="font-size:0.7rem;color:#8899aa;display:none;" onclick="updateWeatherLayer();">
                       <i class="bi bi-arrow-clockwise"></i>
                     </button>
-                    <small style="font-size:0.68rem;color:#556677;margin-left:auto;">
-                      Powered by <span style="color:#4e8fd6;cursor:pointer;text-decoration:underline;"
-                        onclick="window.open('https://www.rainviewer.com','_blank')">RainViewer</span>
+                    <small id="weather-credit" style="font-size:0.68rem;color:#556677;margin-left:auto;">
+                      Powered by <span id="weather-credit-link" style="color:#4e8fd6;cursor:pointer;text-decoration:underline;"
+                        onclick="window.open(this.dataset.url,'_blank')" data-url="https://www.rainviewer.com">RainViewer</span>
                     </small>
                   </div>
                   <label class="form-label mb-1" style="font-size:0.82rem;">Layer</label>
                   <select class="form-select form-select-sm" id="cfg-weather-layer">
-                    <option value="radar">Precipitation Radar</option>
-                    <option value="satellite">Satellite (Infrared)</option>
+                    <option value="radar">Precipitation Radar (RainViewer)</option>
+                    <option value="satellite">Satellite IR (NASA GIBS GOES-East)</option>
+                    <option value="owm_precipitation">Precipitation (OpenWeatherMap)</option>
+                    <option value="owm_clouds">Clouds (OpenWeatherMap)</option>
+                    <option value="owm_temp">Temperature (OpenWeatherMap)</option>
+                    <option value="owm_wind">Wind Speed (OpenWeatherMap)</option>
+                    <option value="owm_pressure">Pressure (OpenWeatherMap)</option>
                   </select>
+                  <div id="cfg-owm-key-row" style="margin-top:0.5rem;display:none;">
+                    <label class="form-label mb-1" style="font-size:0.82rem;">
+                      OpenWeatherMap API Key
+                      <span style="color:#556677;font-size:0.7rem;">
+                        (get one free at <span style="color:#4e8fd6;cursor:pointer;text-decoration:underline;"
+                          onclick="window.open('https://openweathermap.org/api','_blank')">openweathermap.org/api</span>)
+                      </span>
+                    </label>
+                    <input type="text" class="form-control form-control-sm" id="cfg-weather-owm-key"
+                           placeholder="Paste your API key here" autocomplete="off"/>
+                  </div>
                   <label class="form-label mb-1 mt-2" style="font-size:0.82rem;">
                     Opacity: <span id="cfg-weather-opacity-val">0.5</span>
                   </label>
@@ -2819,9 +2835,13 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-range-rings-color").value = cfg.web?.range_rings_color || "#4e8fd6";
   document.getElementById("cfg-weather-overlay").checked = cfg.web?.weather_overlay || false;
   document.getElementById("cfg-weather-layer").value = cfg.web?.weather_layer || "radar";
+  document.getElementById("cfg-weather-owm-key").value = cfg.web?.weather_owm_key || "";
   const wxOp = cfg.web?.weather_opacity ?? 0.5;
   document.getElementById("cfg-weather-opacity").value = wxOp;
   document.getElementById("cfg-weather-opacity-val").textContent = wxOp.toFixed(2);
+  // Reveal/hide the OWM key field based on current selection
+  const _keyRow = document.getElementById("cfg-owm-key-row");
+  if (_keyRow) _keyRow.style.display = (cfg.web?.weather_layer || "").startsWith("owm_") ? "" : "none";
 
   const locMode = cfg.location?.mode || "none";
   document.getElementById("cfg-location-mode").value = locMode;
@@ -3216,6 +3236,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       weather_overlay: document.getElementById("cfg-weather-overlay").checked,
       weather_layer: document.getElementById("cfg-weather-layer").value,
       weather_opacity: parseFloat(document.getElementById("cfg-weather-opacity").value),
+      weather_owm_key: document.getElementById("cfg-weather-owm-key").value.trim(),
     },
     servers: {
       sbs_enabled: document.getElementById("cfg-sbs-server-enabled").checked,
@@ -3270,6 +3291,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       weatherEnabled = payload.web.weather_overlay;
       weatherLayerType = payload.web.weather_layer || "radar";
       weatherOpacity = payload.web.weather_opacity ?? 0.5;
+      weatherOwmKey = payload.web.weather_owm_key || "";
       updateWeatherLayer();
       aircraftTTL = payload.aircraft_ttl;
       alertConfig = payload.alerts;
@@ -3522,11 +3544,71 @@ function drawRangeRings() {
 let weatherEnabled = {{ 'true' if config.web.weather_overlay else 'false' }};
 let weatherLayerType = "{{ config.web.weather_layer | default('radar') }}";
 let weatherOpacity = {{ config.web.weather_opacity | default(0.5) }};
+let weatherOwmKey = "{{ config.web.weather_owm_key | default('') }}";
 let weatherTileLayer = null;
 let weatherRefreshTimer = null;
 let _wxGeneration = 0;
 let _rvHost = "";   // RainViewer tile host (from API)
 let _rvPath = "";   // latest radar or satellite path
+
+function _updateWeatherCredit() {
+  const link = document.getElementById("weather-credit-link");
+  if (!link) return;
+  if (weatherLayerType === "satellite") {
+    link.textContent = "NASA GIBS";
+    link.dataset.url = "https://earthdata.nasa.gov/gibs";
+  } else if (weatherLayerType && weatherLayerType.startsWith("owm_")) {
+    link.textContent = "OpenWeatherMap";
+    link.dataset.url = "https://openweathermap.org";
+  } else {
+    link.textContent = "RainViewer";
+    link.dataset.url = "https://www.rainviewer.com";
+  }
+  // Show/hide OWM key input based on layer choice
+  const keyRow = document.getElementById("cfg-owm-key-row");
+  if (keyRow) keyRow.style.display = (weatherLayerType || "").startsWith("owm_") ? "" : "none";
+}
+
+const _OWM_LAYER_MAP = {
+  owm_precipitation: "precipitation_new",
+  owm_clouds:        "clouds_new",
+  owm_temp:          "temp_new",
+  owm_wind:          "wind_new",
+  owm_pressure:      "pressure_new",
+};
+
+function _applyOwmTiles() {
+  if (weatherTileLayer) {
+    map.removeLayer(weatherTileLayer);
+    weatherTileLayer = null;
+  }
+  const key = (weatherOwmKey || "").trim();
+  if (!key) {
+    setWeatherStatus("error", "API key required");
+    return;
+  }
+  const owmLayer = _OWM_LAYER_MAP[weatherLayerType];
+  if (!owmLayer) {
+    setWeatherStatus("error", "Unknown layer");
+    return;
+  }
+  const url = `https://tile.openweathermap.org/map/${owmLayer}/{z}/{x}/{y}.png?appid=${encodeURIComponent(key)}`;
+  weatherTileLayer = L.tileLayer(url, {
+    opacity: weatherOpacity,
+    maxZoom: 19,
+    attribution: '\u00a9 OpenWeatherMap',
+    pane: "overlayPane",
+    tileSize: 256,
+  }).addTo(map);
+  // Probe a sample tile to detect 401 (invalid key) early
+  fetch(`https://tile.openweathermap.org/map/${owmLayer}/0/0/0.png?appid=${encodeURIComponent(key)}`, { method: "GET", mode: "cors" })
+    .then(r => {
+      if (r.status === 401) setWeatherStatus("error", "Invalid API key");
+      else if (!r.ok)       setWeatherStatus("error", "HTTP " + r.status);
+      else                  setWeatherStatus("ok", "Connected");
+    })
+    .catch(() => setWeatherStatus("ok", "Connected"));  // assume ok if probe network-fails
+}
 
 function setWeatherStatus(status, text) {
   const badge = document.getElementById("weather-status-badge");
@@ -3550,9 +3632,12 @@ function _applyRainViewerTiles() {
     weatherTileLayer = null;
   }
   if (!_rvHost || !_rvPath) return;
-  // RainViewer tile URL: {host}{path}/256/{z}/{x}/{y}/2/1_1.png
-  // color scheme 2 (universal blue), smooth=1, snow=1
-  const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}/2/1_1.png";
+  // RainViewer tile URL: {host}{path}/{size}/{z}/{x}/{y}/{color}/{smooth}_{snow}.png
+  // Radar:     color=2 (universal blue), smooth=1, snow=1
+  // Satellite: color=0 (grayscale IR), smooth=0, snow=0
+  const isSat = (weatherLayerType === "satellite");
+  const suffix = isSat ? "/0/0_0.png" : "/2/1_1.png";
+  const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}" + suffix;
   // 1x1 transparent PNG to replace any "zoom level not supported" tiles
   const blankTile = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   weatherTileLayer = L.tileLayer(url, {
@@ -3568,6 +3653,8 @@ function _applyRainViewerTiles() {
   }).addTo(map);
   // RainViewer returns a "not supported" PNG with 200 OK for unsupported tiles (not a 404),
   // so errorTileUrl alone won't catch it. Intercept on load and blank those tiles.
+  // Skip this for satellite — white clouds on dark background would be misread as text.
+  if (isSat) return;
   weatherTileLayer.on("tileload", function (e) {
     const img = e.tile;
     // RainViewer's "not supported" tile is ~2-3KB; valid tiles vary but the error image
@@ -3595,19 +3682,46 @@ function _applyRainViewerTiles() {
   });
 }
 
+function _applyGibsSatellite() {
+  if (weatherTileLayer) {
+    map.removeLayer(weatherTileLayer);
+    weatherTileLayer = null;
+  }
+  // NASA GIBS GOES-East ABI Band 13 Clean IR — no API key, updated ~10 min.
+  // Correct layer id per GIBS capabilities: "GOES-East_ABI_Band13_Clean_Infrared"
+  // TileMatrixSet: "GoogleMapsCompatible_Level6" (max native zoom = 5).
+  // Using "default" for Time pins to the server's latest frame automatically.
+  const layer = "GOES-East_ABI_Band13_Clean_Infrared";
+  const url = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layer}/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`;
+  weatherTileLayer = L.tileLayer(url, {
+    opacity: weatherOpacity,
+    maxZoom: 19,
+    maxNativeZoom: 5,
+    minNativeZoom: 0,
+    attribution: '\u00a9 NASA GIBS / GOES-East',
+    pane: "overlayPane",
+    tileSize: 256,
+  }).addTo(map);
+  setWeatherStatus("ok", "Connected");
+}
+
 function _fetchRainViewer(gen) {
+  if (weatherLayerType === "satellite") {
+    // RainViewer free tier no longer serves satellite IR reliably — use NASA GIBS instead.
+    _applyGibsSatellite();
+    return;
+  }
+  if ((weatherLayerType || "").startsWith("owm_")) {
+    _applyOwmTiles();
+    return;
+  }
   fetch("https://api.rainviewer.com/public/weather-maps.json")
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(data => {
       if (gen !== _wxGeneration) return;
       _rvHost = data.host || "https://tilecache.rainviewer.com";
-      if (weatherLayerType === "satellite") {
-        const ir = data.satellite?.infrared;
-        _rvPath = ir && ir.length ? ir[ir.length - 1].path : "";
-      } else {
-        const past = data.radar?.past;
-        _rvPath = past && past.length ? past[past.length - 1].path : "";
-      }
+      const past = data.radar?.past;
+      _rvPath = past && past.length ? past[past.length - 1].path : "";
       if (!_rvPath) {
         setWeatherStatus("error", "No data available");
         return;
@@ -3634,6 +3748,7 @@ function updateWeatherLayer() {
     return;
   }
   setWeatherStatus("loading", "Connecting...");
+  _updateWeatherCredit();
   const gen = ++_wxGeneration;
   _fetchRainViewer(gen);
   // Re-fetch every 10 minutes to get the latest radar frame
@@ -3649,7 +3764,17 @@ document.getElementById("cfg-weather-overlay")?.addEventListener("change", funct
 });
 document.getElementById("cfg-weather-layer")?.addEventListener("change", function () {
   weatherLayerType = this.value;
+  _updateWeatherCredit();
   if (weatherEnabled) updateWeatherLayer();
+});
+// Live-update when user pastes/edits the OWM API key (debounced)
+let _owmKeyDebounce = null;
+document.getElementById("cfg-weather-owm-key")?.addEventListener("input", function () {
+  weatherOwmKey = this.value.trim();
+  clearTimeout(_owmKeyDebounce);
+  _owmKeyDebounce = setTimeout(() => {
+    if (weatherEnabled && (weatherLayerType || "").startsWith("owm_")) updateWeatherLayer();
+  }, 800);
 });
 
 // ============================================================

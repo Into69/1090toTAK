@@ -75,8 +75,9 @@ class WebConfig:
     range_rings_color: str = "#4e8fd6"
     range_rings_units: str = "nm"
     weather_overlay: bool = False
-    weather_layer: str = "radar"           # radar | satellite
+    weather_layer: str = "radar"           # radar | satellite | owm_precipitation | owm_clouds | owm_temp
     weather_opacity: float = 0.5
+    weather_owm_key: str = ""              # OpenWeatherMap API key (required for owm_* layers)
 
 
 @dataclass
