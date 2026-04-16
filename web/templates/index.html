@@ -598,6 +598,10 @@
     <span class="dot dot-grey" id="dot-web"></span>
     <span id="status-web">Web :{{ config.web.port }}</span>
   </div>
+  <div class="status-item" id="status-item-location" data-tooltip="">
+    <span class="dot dot-grey" id="dot-location"></span>
+    <span id="status-location">Location: —</span>
+  </div>
   <div class="status-item" id="status-item-cpu">
     <span class="dot dot-grey" id="dot-cpu"></span>
     <span id="status-cpu">CPU —</span>
@@ -832,6 +836,18 @@
                   <span>Preview active — gain applied to live device</span>
                   <span id="usrp-gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
                   <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
+                </div>
+              </div>
+              <div id="row-spectrum-enabled" style="display:none;" class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-spectrum-enabled"
+                         onchange="const t=document.getElementById('cfg-receiver-type').value; const hasSdr=(t==='rtlsdr'||t==='hackrf'||t==='usrp'); document.getElementById('row-spectrum-tab').style.display = (hasSdr && this.checked) ? '' : 'none';"/>
+                  <label class="form-check-label" for="cfg-spectrum-enabled">
+                    Live Spectrum &amp; Waterfall
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                      Show the live FFT spectrum and waterfall panel on the main page (desktop only)
+                    </span>
+                  </label>
                 </div>
               </div>
               <div id="row-spectrum-tab" style="display:none;" class="col-12">
@@ -1137,19 +1153,6 @@
                     <button class="btn btn-xs btn-outline-secondary" style="font-size:0.7rem;"
                             onclick="document.getElementById('cfg-range-rings-color').value='#4e8fd6'; rangeRingsColor='#4e8fd6'; drawRangeRings();">Reset</button>
                   </div>
-                </div>
-              </div>
-
-              <!-- Live Spectrum / Waterfall -->
-              <div class="col-12 mt-2">
-                <div class="form-check form-switch">
-                  <input class="form-check-input" type="checkbox" id="cfg-spectrum-enabled"/>
-                  <label class="form-check-label" for="cfg-spectrum-enabled">
-                    Live Spectrum &amp; Waterfall
-                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
-                      Show the live FFT spectrum and waterfall panel on the main page (desktop only)
-                    </span>
-                  </label>
                 </div>
               </div>
 
@@ -2756,6 +2759,38 @@ setInterval(() => {
         }
       }
 
+      // Location status
+      {
+        const locDot  = document.getElementById("dot-location");
+        const locLbl  = document.getElementById("status-location");
+        const locItem = document.getElementById("status-item-location");
+        const loc = s.location;
+        if (loc && loc.mode === "manual") {
+          if (locDot) locDot.className = "dot dot-green";
+          if (locLbl) locLbl.textContent = "Loc: Man";
+          if (locItem) locItem.dataset.tooltip = loc.lat != null
+            ? `<div class="tt-header">Manual Location</div><div class="tt-row">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</div>`
+            : '<div class="tt-header">Manual Location</div><div class="tt-row">Not configured</div>';
+        } else if (loc && loc.mode === "gpsd") {
+          const hasFix = loc.lat != null;
+          if (locDot) locDot.className = "dot " + (hasFix ? "dot-green" : "dot-yellow");
+          if (locLbl) locLbl.textContent = hasFix ? "Loc: GPSd (fix)" : "Loc: GPSd (no fix)";
+          if (locItem) locItem.dataset.tooltip = hasFix
+            ? `<div class="tt-header">GPSd Location</div><div class="tt-row">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</div>`
+            : '<div class="tt-header">GPSd</div><div class="tt-row">Waiting for fix…</div>';
+        } else if (loc && loc.mode === "receiver") {
+          if (locDot) locDot.className = "dot dot-green";
+          if (locLbl) locLbl.textContent = "Loc: Receiver";
+          if (locItem) locItem.dataset.tooltip = loc.lat != null
+            ? `<div class="tt-header">Receiver Location</div><div class="tt-row">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</div>`
+            : '';
+        } else {
+          if (locDot) locDot.className = "dot dot-grey";
+          if (locLbl) locLbl.textContent = "Loc: None";
+          if (locItem) locItem.dataset.tooltip = '';
+        }
+      }
+
       if (s.system) {
         const cpuDot  = document.getElementById("dot-cpu");
         const cpuLbl  = document.getElementById("status-cpu");
@@ -2763,16 +2798,12 @@ setInterval(() => {
         const memLbl  = document.getElementById("status-mem");
         const cpu      = s.system.cpu_pct;
         const memUsed  = s.system.mem_used_mb;
-        const memTotal = s.system.mem_total_mb;
-        const memPct   = s.system.mem_pct != null ? s.system.mem_pct : (memTotal ? (memUsed / memTotal * 100) : 0);
         if (cpuDot) cpuDot.className = "dot " + (cpu > 80 ? "dot-red" : cpu > 60 ? "dot-yellow" : "dot-green");
         if (cpuLbl) cpuLbl.textContent = `CPU ${cpu.toFixed(0)}%`;
-        if (memDot) memDot.className = "dot " + (memPct > 85 ? "dot-red" : memPct > 70 ? "dot-yellow" : "dot-green");
+        if (memDot) memDot.className = "dot dot-green";
         if (memLbl) {
           const fmt = (mb) => mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
-          memLbl.textContent = memTotal
-            ? `MEM ${memPct.toFixed(0)}% (${fmt(memUsed)} / ${fmt(memTotal)})`
-            : `MEM ${fmt(memUsed)}`;
+          memLbl.textContent = `MEM ${fmt(memUsed)}`;
         }
       }
 
@@ -3067,7 +3098,10 @@ function updateReceiverFields() {
   document.getElementById("row-rtlsdr").style.display        = hasSdr ? "" : "none";
   document.getElementById("row-hackrf").style.display        = hasHackrf ? "" : "none";
   document.getElementById("row-usrp").style.display          = hasUsrp ? "" : "none";
-  document.getElementById("row-spectrum-tab").style.display  = (type === "rtlsdr" || type === "hackrf" || type === "usrp") ? "" : "none";
+  const hasSpectrum = (type === "rtlsdr" || type === "hackrf" || type === "usrp");
+  document.getElementById("row-spectrum-enabled").style.display = hasSpectrum ? "" : "none";
+  // Only show the live spectrum display if the receiver supports it AND the feature is enabled.
+  document.getElementById("row-spectrum-tab").style.display  = (hasSpectrum && spectrumFeatureEnabled) ? "" : "none";
   document.getElementById("row-json-status").style.display   = type === "json" ? "" : "none";
   if (hasSdr && sdrWasHidden) refreshRtlsdrDevices();
   updateAgcToggle();

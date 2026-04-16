@@ -16,11 +16,51 @@ log = logging.getLogger(__name__)
 # needs one priming call before it returns meaningful values on Linux.
 try:
     import psutil as _psutil
-    _psutil.cpu_percent(interval=None)      # prime the system-wide counter
+    _psutil.Process().cpu_percent(interval=None)  # prime the per-process counter
     _HAS_PSUTIL = True
-except Exception:
+except Exception as _e:
     _psutil = None
     _HAS_PSUTIL = False
+    log.warning("psutil not available (%s) — falling back to /proc for system stats", _e)
+
+# /proc-based fallback for Linux when psutil is missing
+_prev_cpu_idle = 0
+_prev_cpu_total = 0
+
+def _proc_system_stats() -> dict | None:
+    """Read CPU and memory from /proc (Linux only)."""
+    global _prev_cpu_idle, _prev_cpu_total
+    import os
+    if os.name != "posix":
+        return None
+    try:
+        # CPU — diff between two reads of /proc/stat
+        with open("/proc/stat") as f:
+            parts = f.readline().split()
+        # user nice system idle iowait irq softirq steal
+        vals = [int(v) for v in parts[1:9]]
+        idle = vals[3] + vals[4]   # idle + iowait
+        total = sum(vals)
+        d_idle = idle - _prev_cpu_idle
+        d_total = total - _prev_cpu_total
+        cpu_pct = 0.0 if d_total == 0 else (1.0 - d_idle / d_total) * 100.0
+        _prev_cpu_idle = idle
+        _prev_cpu_total = total
+
+        # App RSS from /proc/self/status
+        rss_kb = 0
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    rss_kb = int(line.split()[1])
+                    break
+
+        return {
+            "cpu_pct": round(cpu_pct, 1),
+            "mem_used_mb": rss_kb >> 10,
+        }
+    except Exception:
+        return None
 
 _web_dir = Path(__file__).parent
 
@@ -152,14 +192,31 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             **web_client_status(),
         }
         stats["update"] = _get_update_state()
+        # Location summary for status bar
+        from config import LOCATION_NONE, RECEIVER_JSON
+        loc = config.location
+        if loc.mode != LOCATION_NONE and not (loc.lat == 0.0 and loc.lon == 0.0):
+            stats["location"] = {"mode": loc.mode, "lat": loc.lat, "lon": loc.lon}
+        elif loc.mode == LOCATION_NONE and config.receiver.type == RECEIVER_JSON and receiver is not None:
+            rlat = getattr(receiver, "receiver_lat", None)
+            rlon = getattr(receiver, "receiver_lon", None)
+            if rlat is not None and rlon is not None:
+                stats["location"] = {"mode": "receiver", "lat": rlat, "lon": rlon}
+            else:
+                stats["location"] = {"mode": "none"}
+        else:
+            stats["location"] = {"mode": loc.mode if loc.mode != LOCATION_NONE else "none"}
         if _HAS_PSUTIL:
-            vm = _psutil.virtual_memory()
+            proc = _psutil.Process()
+            mem_info = proc.memory_info()
             stats["system"] = {
-                "cpu_pct":      _psutil.cpu_percent(interval=None),
-                "mem_used_mb":  vm.used  >> 20,
-                "mem_total_mb": vm.total >> 20,
-                "mem_pct":      vm.percent,
+                "cpu_pct":      proc.cpu_percent(interval=None),
+                "mem_used_mb":  mem_info.rss >> 20,
             }
+        else:
+            proc_stats = _proc_system_stats()
+            if proc_stats:
+                stats["system"] = proc_stats
         return stats
 
     @router.get("/api/config")
