@@ -1140,6 +1140,19 @@
                 </div>
               </div>
 
+              <!-- Live Spectrum / Waterfall -->
+              <div class="col-12 mt-2">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-spectrum-enabled"/>
+                  <label class="form-check-label" for="cfg-spectrum-enabled">
+                    Live Spectrum &amp; Waterfall
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">
+                      Show the live FFT spectrum and waterfall panel on the main page (desktop only)
+                    </span>
+                  </label>
+                </div>
+              </div>
+
               <!-- Weather Overlay -->
               <div class="col-12 mt-2">
                 <div class="form-check form-switch">
@@ -2160,7 +2173,7 @@ function connectWebSocket() {
     wsConnected = true;
     document.getElementById("nav-receiver-badge").className = "badge bg-success";
     document.getElementById("nav-receiver-badge").textContent = "LIVE";
-    wsSend("spectrum_subscribe", true);
+    if (spectrumFeatureEnabled) wsSend("spectrum_subscribe", true);
   };
 
   ws.onclose = () => {
@@ -2232,6 +2245,7 @@ function connectWebSocket() {
         break;
       }
       case "spectrum_update": {
+        if (!spectrumFeatureEnabled) break;
         const sdata = msg.data;
         spectrumData = sdata.bins;
         if (!spectrumPeak || spectrumPeak.length !== spectrumData.length) {
@@ -2337,6 +2351,21 @@ fetch("/api/aircraft")
 // ============================================================
 // SPECTRUM
 // ============================================================
+let spectrumFeatureEnabled = {{ 'true' if config.web.spectrum_enabled else 'false' }};
+
+function applySpectrumFeatureState() {
+  const sp = document.getElementById("spectrum-panel");
+  if (!sp) return;
+  if (!spectrumFeatureEnabled) {
+    sp.style.display = "none";
+    // Drop subscription so server stops pushing data
+    if (wsConnected) wsSend("spectrum_subscribe", false);
+  } else if (wsConnected) {
+    wsSend("spectrum_subscribe", true);
+    // Panel is auto-revealed once the next spectrum_update arrives
+  }
+}
+
 const SPECTRUM_DB_RANGE = 10;   // total visible range in dB
 let SPECTRUM_MIN_DB = -45;       // tracks noise floor (updated from signal_quality)
 let SPECTRUM_MAX_DB = SPECTRUM_MIN_DB + SPECTRUM_DB_RANGE;
@@ -2833,6 +2862,7 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-range-rings-opacity").value = rrOp;
   document.getElementById("cfg-range-rings-opacity-val").textContent = parseFloat(rrOp).toFixed(2);
   document.getElementById("cfg-range-rings-color").value = cfg.web?.range_rings_color || "#4e8fd6";
+  document.getElementById("cfg-spectrum-enabled").checked = cfg.web?.spectrum_enabled !== false;
   document.getElementById("cfg-weather-overlay").checked = cfg.web?.weather_overlay || false;
   document.getElementById("cfg-weather-layer").value = cfg.web?.weather_layer || "radar";
   document.getElementById("cfg-weather-owm-key").value = cfg.web?.weather_owm_key || "";
@@ -3233,6 +3263,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       range_rings_units: document.querySelector('input[name="cfg-rr-units"]:checked')?.value || "nm",
       range_rings_opacity: parseFloat(document.getElementById("cfg-range-rings-opacity").value),
       range_rings_color: document.getElementById("cfg-range-rings-color").value,
+      spectrum_enabled: document.getElementById("cfg-spectrum-enabled").checked,
       weather_overlay: document.getElementById("cfg-weather-overlay").checked,
       weather_layer: document.getElementById("cfg-weather-layer").value,
       weather_opacity: parseFloat(document.getElementById("cfg-weather-opacity").value),
@@ -3288,6 +3319,8 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       rangeRingsOpacity = payload.web.range_rings_opacity ?? 0.6;
       rangeRingsColor = payload.web.range_rings_color || "#4e8fd6";
       drawRangeRings();
+      spectrumFeatureEnabled = payload.web.spectrum_enabled !== false;
+      applySpectrumFeatureState();
       weatherEnabled = payload.web.weather_overlay;
       weatherLayerType = payload.web.weather_layer || "radar";
       weatherOpacity = payload.web.weather_opacity ?? 0.5;
