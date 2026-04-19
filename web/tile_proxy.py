@@ -16,7 +16,7 @@ import urllib.error
 
 log = logging.getLogger(__name__)
 
-# Root directory for cached tiles (next to main.py)
+# Root directory for cached tiles (next to 1090toTAK.py)
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "tile_cache")
 
 # Round-robin counter for Google subdomain rotation (thread-safe)
@@ -54,6 +54,70 @@ _EXT_FOR_CT = {
     "image/jpg":  "jpg",
     "image/webp": "webp",
 }
+
+# Weather overlay providers. The `frame` URL segment is a cache-busting bucket
+# supplied by the client so tiles for different time slices live in separate
+# cache subdirs (e.g. RainViewer frame timestamp, or a 10-min bucket for GIBS/OWM).
+_OWM_LAYER_NAME = {
+    "owm-precipitation": "precipitation_new",
+    "owm-clouds":        "clouds_new",
+    "owm-temp":          "temp_new",
+    "owm-wind":          "wind_new",
+    "owm-pressure":      "pressure_new",
+}
+_WEATHER_SOURCES = {"rv-radar", "rv-sat", "gibs"} | set(_OWM_LAYER_NAME)
+
+
+def _weather_upstream(source: str, frame: str, z: int, x: int, y: int, owm_key: str = ""):
+    if source == "rv-radar":
+        # Color palette 2 (universal blue), smoothed, snow rendering on
+        return f"https://tilecache.rainviewer.com/v2/radar/{frame}/256/{z}/{x}/{y}/2/1_1.png"
+    if source == "rv-sat":
+        return f"https://tilecache.rainviewer.com/v2/satellite/{frame}/256/{z}/{x}/{y}/0/0_0.png"
+    if source == "gibs":
+        # NASA GIBS GOES-East ABI Band 13 Clean IR — server always returns the latest frame.
+        return (f"https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/"
+                f"GOES-East_ABI_Band13_Clean_Infrared/default/default/"
+                f"GoogleMapsCompatible_Level6/{z}/{y}/{x}.png")
+    layer = _OWM_LAYER_NAME.get(source)
+    if layer:
+        if not owm_key:
+            return None
+        return f"https://tile.openweathermap.org/map/{layer}/{z}/{x}/{y}.png?appid={owm_key}"
+    return None
+
+
+def fetch_weather_tile(source: str, frame: str, z: int, x: int, y: int, owm_key: str = ""):
+    """
+    Return (bytes, content_type) for the requested weather tile, using disk cache.
+    Cache layout: tile_cache/weather/<source>/<frame>/<z>/<x>/<y>.png
+    """
+    if source not in _WEATHER_SOURCES:
+        raise ValueError(f"Unknown weather source: {source!r}")
+    if not (0 <= z <= 22 and 0 <= x < 2**z and 0 <= y < 2**z):
+        raise ValueError(f"Invalid tile coordinates: z={z} x={x} y={y}")
+    # Frame must be a safe single path component to prevent traversal
+    if not frame or len(frame) > 64 or not all(c.isalnum() or c in "-_" for c in frame):
+        raise ValueError(f"Invalid frame: {frame!r}")
+
+    cache_path = os.path.join(CACHE_DIR, "weather", source, frame, str(z), str(x), f"{y}.png")
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            return f.read(), "image/png"
+
+    url = _weather_upstream(source, frame, z, x, y, owm_key)
+    if url is None:
+        raise ValueError(f"Source {source!r} requires an OpenWeatherMap API key")
+
+    req = urllib.request.Request(url, headers=_HEADERS)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = resp.read()
+        ct = resp.headers.get("Content-Type", "image/png").split(";")[0].strip()
+
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with open(cache_path, "wb") as f:
+        f.write(data)
+    return data, ct
 
 
 def _cache_path(source: str, z: int, x: int, y: int, ext: str) -> str:

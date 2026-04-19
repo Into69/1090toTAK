@@ -3,7 +3,7 @@
 1090toTAK — RTL-SDR ADS-B receiver with web display and TAK output.
 
 Usage:
-  python main.py [options]
+  python 1090toTAK.py [options]
 
 Options:
   --receiver {sbs,avr,rtlsdr}   ADS-B source type (default: sbs)

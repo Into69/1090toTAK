@@ -37,9 +37,20 @@ The built-in `rtlsdr` receiver is convenient (no extra services), but a C decode
 
 ## Installation
 
+### One-line install (Linux / macOS / WSL)
+
+Downloads the installer, makes it executable, and runs it. The installer clones the repo, creates a Python venv, installs requirements, and offers to install [readsb](https://github.com/wiedehopf/readsb).
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Into69/1090toTAK/main/install.1090toTAK.sh && chmod +x install.1090toTAK.sh && ./install.1090toTAK.sh
+```
+
+### Manual install
+
 ```bash
 git clone https://github.com/Into69/1090toTAK.git
 cd 1090toTAK
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -64,7 +75,9 @@ The app detects available hardware libraries at startup and enables receiver typ
 ## Usage
 
 ```bash
-python main.py
+./1090toTAK.sh        # auto-activates the venv created by the installer
+# or, with the venv already active:
+python 1090toTAK.py
 ```
 
 The web UI is available at **http://localhost:8080**.
@@ -114,7 +127,7 @@ All options can also be set through the web UI settings panel and are persisted 
 
 ```
 1090toTAK/
-├── main.py              # Entry point
+├── 1090toTAK.py         # Entry point
 ├── config.py            # Configuration dataclasses and persistence
 ├── capabilities.py      # Runtime hardware detection
 ├── version.py           # Version string

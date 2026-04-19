@@ -317,11 +317,6 @@
       font-size: 0.75rem;
     }
     .hist-row + .hist-row { margin-top: 5px; }
-    .hist-sep { color: #556; }
-    .hist-dt  { width: 160px !important; font-size: 0.72rem !important;
-                background: rgba(20,22,24,0.93); border-color: #2c2f33; color: #cdd0d5;
-                color-scheme: dark; }
-    .hist-dt:focus { border-color: #4e8fd6; box-shadow: none; }
     #hist-status  { font-size: 0.72rem; color: #8899aa; }
     #hist-time-lbl{ font-size: 0.72rem; color: #cdd0d5; white-space: nowrap; min-width: 130px; }
     #hist-slider  { accent-color: #4e8fd6; }
@@ -480,11 +475,6 @@
         <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2" data-hours="6">6h</button>
         <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2" data-hours="12">12h</button>
         <button class="btn btn-xs btn-outline-secondary hist-preset py-0 px-2 active" data-hours="24">24h</button>
-        <span class="hist-sep">|</span>
-        <input type="datetime-local" id="hist-start" class="form-control form-control-sm hist-dt"/>
-        <span class="hist-sep">–</span>
-        <input type="datetime-local" id="hist-end" class="form-control form-control-sm hist-dt"/>
-        <button id="hist-load-btn" class="btn btn-sm btn-primary py-0">Load</button>
         <span id="hist-status"></span>
       </div>
       <!-- Row 2: Mode + playback -->
@@ -932,7 +922,7 @@
                 </div>
               </div>
               <div class="col-12 mt-2">
-                <label class="form-label">Tile Cache</label>
+                <label class="form-label">Tile Cache <span style="color:#667788;font-weight:normal;font-size:0.72rem;">(map + weather)</span></label>
                 <div class="d-flex align-items-center gap-3" style="font-size:0.8rem;color:#8899aa;">
                   <span id="tile-cache-size">Calculating…</span>
                   <button class="btn btn-sm btn-outline-danger py-0 px-2" id="btn-clear-tile-cache"
@@ -3344,14 +3334,26 @@ function drawRangeRings() {
   }
   rangeRingsLayer.addTo(map);
   const METERS = rangeRingsUnits === "km" ? 1000 : rangeRingsUnits === "mi" ? 1609.344 : 1852;
-  for (const nm of rangeRingsNm) {
+  const sortedNm = [...rangeRingsNm].sort((a, b) => a - b);
+  const cosLat = Math.cos(sensorLat * Math.PI / 180) || 1;
+  sortedNm.forEach((nm, idx) => {
     L.circle([sensorLat, sensorLon], {
       radius: nm * METERS, color: rangeRingsColor, weight: 1.5,
       fillOpacity: 0, opacity: rangeRingsOpacity, dashArray: "8,5", interactive: false,
     }).addTo(rangeRingsLayer);
     const latOffset = (nm * METERS) / 111320;
-    for (const lat of [sensorLat + latOffset, sensorLat - latOffset]) {
-      L.marker([lat, sensorLon], {
+    const lonOffset = (nm * METERS) / (111320 * cosLat);
+    const positions = [
+      [sensorLat + latOffset, sensorLon],
+      [sensorLat - latOffset, sensorLon],
+    ];
+    // First (innermost) ring: top/bottom only. All outer rings: also left/right.
+    if (idx > 0) {
+      positions.push([sensorLat, sensorLon + lonOffset]);
+      positions.push([sensorLat, sensorLon - lonOffset]);
+    }
+    for (const [lat, lon] of positions) {
+      L.marker([lat, lon], {
         icon: L.divIcon({
           className: "range-ring-label",
           html: `<span>${nm} ${rangeRingsUnits}</span>`,
@@ -3360,7 +3362,7 @@ function drawRangeRings() {
         interactive: false,
       }).addTo(rangeRingsLayer);
     }
-  }
+  });
 }
 
 // ============================================================
@@ -3467,8 +3469,7 @@ function _applyOwmTiles() {
     map.removeLayer(weatherTileLayer);
     weatherTileLayer = null;
   }
-  const key = (weatherOwmKey || "").trim();
-  if (!key) {
+  if (!(weatherOwmKey || "").trim()) {
     setWeatherStatus("error", "API key required");
     return;
   }
@@ -3477,7 +3478,11 @@ function _applyOwmTiles() {
     setWeatherStatus("error", "Unknown layer");
     return;
   }
-  const url = `https://tile.openweathermap.org/map/${owmLayer}/{z}/{x}/{y}.png?appid=${encodeURIComponent(key)}`;
+  // Server-side proxy reads the API key from config — no key in URL.
+  // Frame = 10-min bucket, so each new window gets a fresh disk-cache entry.
+  const source = "owm-" + owmLayer.replace("_new", "");
+  const frame  = "b" + Math.floor(Date.now() / 600000);
+  const url = `/tiles/weather/${source}/${frame}/{z}/{x}/{y}`;
   weatherTileLayer = bufferedTileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
@@ -3487,16 +3492,7 @@ function _applyOwmTiles() {
     tileBuffer: 2,
     keepBuffer: 4,
   }).addTo(map);
-  // Probe a sample tile to detect 401 (invalid key) early. If we get a sticky
-  // error here, suppress later load-cycle status updates so the specific message survives.
-  const layerRef = weatherTileLayer;
-  fetch(`https://tile.openweathermap.org/map/${owmLayer}/0/0/0.png?appid=${encodeURIComponent(key)}`, { method: "GET", mode: "cors" })
-    .then(r => {
-      if (r.status === 401)      { setWeatherStatus("error", "Invalid API key"); layerRef._statusLocked = true; }
-      else if (!r.ok)            { setWeatherStatus("error", "HTTP " + r.status); layerRef._statusLocked = true; }
-      else                       setWeatherStatus("ok", "Connected");
-    })
-    .catch(() => setWeatherStatus("ok", "Connected"));  // assume ok if probe network-fails
+  setWeatherStatus("ok", "Connected");
 }
 
 function setWeatherStatus(status, text) {
@@ -3521,13 +3517,13 @@ function _applyRainViewerTiles() {
     map.removeLayer(weatherTileLayer);
     weatherTileLayer = null;
   }
-  if (!_rvHost || !_rvPath) return;
-  // RainViewer tile URL: {host}{path}/{size}/{z}/{x}/{y}/{color}/{smooth}_{snow}.png
-  // Radar:     color=2 (universal blue), smooth=1, snow=1
-  // Satellite: color=0 (grayscale IR), smooth=0, snow=0
+  if (!_rvPath) return;
+  // _rvPath looks like "/v2/radar/1234567890" — last segment is the frame timestamp.
   const isSat = (weatherLayerType === "satellite");
-  const suffix = isSat ? "/0/0_0.png" : "/2/1_1.png";
-  const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}" + suffix;
+  const frame = _rvPath.split("/").filter(Boolean).pop();
+  if (!frame) return;
+  const source = isSat ? "rv-sat" : "rv-radar";
+  const url = `/tiles/weather/${source}/${frame}/{z}/{x}/{y}`;
   // 1x1 transparent PNG to replace any "zoom level not supported" tiles
   const blankTile = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   weatherTileLayer = bufferedTileLayer(url, {
@@ -3541,7 +3537,6 @@ function _applyRainViewerTiles() {
     attribution: '\u00a9 RainViewer',
     pane: "overlayPane",
     tileSize: 256,
-    crossOrigin: "anonymous",   // needed so the canvas below isn't security-tainted
   }).addTo(map);
   // RainViewer returns a "not supported" PNG with 200 OK for unsupported tiles (not a 404),
   // so errorTileUrl alone won't catch it. Intercept on load and blank those tiles.
@@ -3549,9 +3544,6 @@ function _applyRainViewerTiles() {
   if (isSat) return;
   weatherTileLayer.on("tileload", function (e) {
     const img = e.tile;
-    // RainViewer's "not supported" tile is ~2-3KB; valid tiles vary but the error image
-    // has a distinctive small size. naturalWidth/Height are 256 either way, so we can't
-    // distinguish by dimensions. Instead, draw to a canvas and sample a known pixel.
     try {
       if (img.complete && img.naturalWidth === 256) {
         const c = document.createElement("canvas");
@@ -3563,14 +3555,13 @@ function _applyRainViewerTiles() {
         const d = ctx.getImageData(100, 120, 56, 16).data;
         let textPixels = 0;
         for (let i = 0; i < d.length; i += 4) {
-          // The error tile uses light grey text ~(180,180,180) with full alpha
           if (d[i] > 150 && d[i+1] > 150 && d[i+2] > 150 && d[i+3] > 200) textPixels++;
         }
         if (textPixels > 20) {
           img.src = blankTile;
         }
       }
-    } catch (err) { /* CORS-tainted canvas: ignore */ }
+    } catch (err) { /* canvas read failed: ignore */ }
   });
 }
 
@@ -3579,12 +3570,11 @@ function _applyGibsSatellite() {
     map.removeLayer(weatherTileLayer);
     weatherTileLayer = null;
   }
-  // NASA GIBS GOES-East ABI Band 13 Clean IR — no API key, updated ~10 min.
-  // Correct layer id per GIBS capabilities: "GOES-East_ABI_Band13_Clean_Infrared"
-  // TileMatrixSet: "GoogleMapsCompatible_Level6" (max native zoom = 5).
-  // Using "default" for Time pins to the server's latest frame automatically.
-  const layer = "GOES-East_ABI_Band13_Clean_Infrared";
-  const url = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layer}/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`;
+  // NASA GIBS GOES-East ABI Band 13 Clean IR via server proxy (cached).
+  // Server always requests the latest frame from GIBS; frame = 10-min bucket
+  // so different time windows live in separate cache entries.
+  const frame = "b" + Math.floor(Date.now() / 600000);
+  const url = `/tiles/weather/gibs/${frame}/{z}/{x}/{y}`;
   weatherTileLayer = bufferedTileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
@@ -3641,6 +3631,11 @@ function updateWeatherLayer() {
     setWeatherStatus("off", "Off");
     return;
   }
+  // Suppress weather tiles in history mode — heatmap/playback should stay readable
+  if (document.body.classList.contains("history-active")) {
+    setWeatherStatus("off", "Hidden in history mode");
+    return;
+  }
   setWeatherStatus("loading", "Connecting...");
   _updateWeatherCredit();
   const gen = ++_wxGeneration;
@@ -3661,13 +3656,21 @@ document.getElementById("cfg-weather-layer")?.addEventListener("change", functio
   _updateWeatherCredit();
   if (weatherEnabled) updateWeatherLayer();
 });
-// Live-update when user pastes/edits the OWM API key (debounced)
+// Live-update when user pastes/edits the OWM API key (debounced).
+// Server-side proxy reads the key from config, so push a partial config update
+// before refreshing the layer.
 let _owmKeyDebounce = null;
 document.getElementById("cfg-weather-owm-key")?.addEventListener("input", function () {
   weatherOwmKey = this.value.trim();
   clearTimeout(_owmKeyDebounce);
   _owmKeyDebounce = setTimeout(() => {
-    if (weatherEnabled && (weatherLayerType || "").startsWith("owm_")) updateWeatherLayer();
+    if (!(weatherEnabled && (weatherLayerType || "").startsWith("owm_"))) return;
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ web: { weather_owm_key: weatherOwmKey } }),
+    }).then(() => updateWeatherLayer())
+      .catch(() => updateWeatherLayer());
   }, 800);
 });
 
@@ -4281,15 +4284,19 @@ function restartApp() {
       hour:"2-digit",minute:"2-digit",second:"2-digit"});
   }
 
-  function toLocalDatetimeValue(ts) {
-    const d = new Date(ts * 1000);
-    // datetime-local expects "YYYY-MM-DDTHH:MM"
-    const pad = n => String(n).padStart(2,"0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  function fromLocalDatetimeValue(val) {
-    return val ? new Date(val).getTime() / 1000 : 0;
+  function setPlayerEnabled(on) {
+    const ids = ["hist-play-btn", "hist-slider", "hist-speed"];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !on;
+    }
+    const player = document.getElementById("hist-player");
+    if (player) player.style.opacity = on ? "" : "0.45";
+    // Time-range presets only meaningful for playback (heatmap is fixed 24h)
+    document.querySelectorAll(".hist-preset").forEach(btn => {
+      btn.disabled = !on;
+      btn.style.opacity = on ? "" : "0.45";
+    });
   }
 
   function setStatus(msg, ok) {
@@ -4301,6 +4308,8 @@ function restartApp() {
   function enterHistory() {
     histActive = true;
     document.body.classList.add("history-active");
+    // Hide weather overlay while in history mode
+    if (weatherEnabled) updateWeatherLayer();
     document.getElementById("btn-history-mode").classList.add("active","btn-info");
     document.getElementById("btn-history-mode").classList.remove("btn-outline-secondary");
     const sp = document.getElementById("spectrum-panel");
@@ -4314,7 +4323,7 @@ function restartApp() {
     histCurMode = "heatmap";
     document.getElementById("hist-mode-heatmap").classList.add("active");
     document.getElementById("hist-mode-playback").classList.remove("active");
-    document.getElementById("hist-player").style.display = "none";
+    setPlayerEnabled(false);
     // Layer group for history markers
     if (!histLayerGrp) {
       histLayerGrp = L.layerGroup().addTo(map);
@@ -4326,27 +4335,16 @@ function restartApp() {
     badge.className   = "badge bg-warning text-dark";
     badge.style.cursor = "pointer";
     badge.title = "Back to live";
-    // Initialise datetime pickers to actual data bounds (fall back to last 24 h)
-    fetch("/api/store/stats").then(r => r.json()).then(stats => {
-      const now = Date.now() / 1000;
-      if (stats.oldest_ts && stats.newest_ts) {
-        histStart = stats.oldest_ts;
-        histEnd   = stats.newest_ts;
-      } else {
-        histStart = now - 86400;
-        histEnd   = now;
-      }
-      document.getElementById("hist-start").value = toLocalDatetimeValue(histStart);
-      document.getElementById("hist-end").value   = toLocalDatetimeValue(histEnd);
-      // Pick the right preset button if data span matches one
-      document.querySelectorAll(".hist-preset").forEach(b => b.classList.remove("active"));
-      const spanHours = Math.round((histEnd - histStart) / 3600);
-      const matchBtn = document.querySelector(`.hist-preset[data-hours="${spanHours}"]`);
-      if (matchBtn) matchBtn.classList.add("active");
-      // Let the browser reflow (sidebar hidden, map expanded) before telling
-      // Leaflet to recalculate its size and request the newly-visible tiles.
-      setTimeout(() => { map.invalidateSize(); loadHeatmap(); }, 50);
-    });
+    // Default range: last 24h (used when user switches to Playback)
+    const now = Date.now() / 1000;
+    histEnd   = now;
+    histStart = now - 86400;
+    document.querySelectorAll(".hist-preset").forEach(b => b.classList.remove("active"));
+    const def = document.querySelector(`.hist-preset[data-hours="24"]`);
+    if (def) def.classList.add("active");
+    // Let the browser reflow (sidebar hidden, map expanded) before telling
+    // Leaflet to recalculate its size and request the newly-visible tiles.
+    setTimeout(() => { map.invalidateSize(); loadHeatmap(); }, 50);
   }
 
   function exitHistory() {
@@ -4356,6 +4354,8 @@ function restartApp() {
     histActive = false;
     histData   = {};
     document.body.classList.remove("history-active");
+    // Restore weather overlay if it was enabled
+    if (weatherEnabled) updateWeatherLayer();
     const sp = document.getElementById("spectrum-panel");
     if (sp && spectrumData) sp.style.display = "";
     document.getElementById("btn-history-mode").classList.remove("active","btn-info");
@@ -4387,11 +4387,13 @@ function restartApp() {
   function loadHeatmap() {
     clearHeat();
     clearPlaybackLayer();
-    setStatus("Loading heatmap…");
-    fetch(`/api/heatmap?start=${histStart}&end=${histEnd}`)
+    setStatus("Loading heatmap (last 24h)…");
+    const heatEnd = Math.floor(Date.now() / 1000);
+    const heatStart = heatEnd - 86400;
+    fetch(`/api/heatmap?start=${heatStart}&end=${heatEnd}`)
       .then(r => r.json())
       .then(pts => {
-        if (!pts.length) { setStatus("No data in range", false); return; }
+        if (!pts.length) { setStatus("No data in last 24h", false); return; }
         heatLayer = L.heatLayer(pts, {
           radius: 25, blur: 18, maxZoom: 10, minOpacity: 0.3,
           gradient: {0.2:"#00f", 0.5:"#0f0", 0.75:"#ff0", 1:"#f00"},
@@ -4404,7 +4406,7 @@ function restartApp() {
           [Math.max(...lats), Math.max(...lons)]
         );
         map.fitBounds(bounds.pad(0.15));
-        setStatus(`Heatmap: ${pts.length.toLocaleString()} cells`);
+        setStatus(`Heatmap (last 24h): ${pts.length.toLocaleString()} cells`);
         updateBadge(`${pts.length.toLocaleString()} cells`);
       })
       .catch(e => setStatus(`Heatmap error: ${e}`, false));
@@ -4438,8 +4440,6 @@ function restartApp() {
   }
 
   function loadData() {
-    histStart = fromLocalDatetimeValue(document.getElementById("hist-start").value);
-    histEnd   = fromLocalDatetimeValue(document.getElementById("hist-end").value);
     if (!histStart || !histEnd || histEnd <= histStart) {
       setStatus("Invalid time range", false); return;
     }
@@ -4585,7 +4585,7 @@ function restartApp() {
       if (histActive) exitHistory();
     });
 
-    // Preset buttons
+    // Preset buttons — set range and reload (heatmap is fixed 24h, presets affect playback)
     document.querySelectorAll(".hist-preset").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".hist-preset").forEach(b => b.classList.remove("active"));
@@ -4594,8 +4594,7 @@ function restartApp() {
         const now = Date.now() / 1000;
         histEnd   = now;
         histStart = now - hours * 3600;
-        document.getElementById("hist-end").value   = toLocalDatetimeValue(histEnd);
-        document.getElementById("hist-start").value = toLocalDatetimeValue(histStart);
+        if (histCurMode === "playback") loadPlayback();
       });
     });
 
@@ -4604,7 +4603,7 @@ function restartApp() {
       histCurMode = "playback";
       document.getElementById("hist-mode-playback").classList.add("active");
       document.getElementById("hist-mode-heatmap").classList.remove("active");
-      document.getElementById("hist-player").style.display = "";
+      setPlayerEnabled(true);
       clearHeat();
       // Auto-load playback if a time range is set but no playback data in memory
       if (histStart && !Object.keys(histData).length) loadPlayback();
@@ -4613,15 +4612,12 @@ function restartApp() {
       histCurMode = "heatmap";
       document.getElementById("hist-mode-heatmap").classList.add("active");
       document.getElementById("hist-mode-playback").classList.remove("active");
-      document.getElementById("hist-player").style.display = "none";
+      setPlayerEnabled(false);
       stopPlay();
       clearPlaybackLayer();
       // Auto-load the full-range heatmap if a time range is already loaded
       if (histStart) loadHeatmap();
     });
-
-    // Load
-    document.getElementById("hist-load-btn").addEventListener("click", loadData);
 
     // Play/pause
     document.getElementById("hist-play-btn").addEventListener("click", () => {

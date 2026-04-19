@@ -407,6 +407,18 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             return {"mode": loc.mode, "lat": None, "lon": None}
         return {"mode": loc.mode, "lat": loc.lat, "lon": loc.lon}
 
+    @router.get("/tiles/weather/{source}/{frame}/{z}/{x}/{y}")
+    def proxy_weather_tile(source: str, frame: str, z: int, x: int, y: int):
+        from .tile_proxy import fetch_weather_tile
+        try:
+            data, ct = fetch_weather_tile(source, frame, z, x, y, config.web.weather_owm_key)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            log.warning("Weather tile fetch failed %s/%s/%d/%d/%d: %s", source, frame, z, x, y, e)
+            raise HTTPException(status_code=502, detail="Tile unavailable")
+        return Response(content=data, media_type=ct, headers={"Cache-Control": "public, max-age=600"})
+
     @router.get("/tiles/{source}/{z}/{x}/{y}")
     def proxy_tile(source: str, z: int, x: int, y: int):
         from .tile_proxy import fetch_tile
