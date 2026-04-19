@@ -8,7 +8,7 @@ from starlette.templating import Jinja2Templates
 
 from config import AppConfig, update_config_from_dict, save_config, config_to_dict
 from aircraft.registry import AircraftRegistry
-from capabilities import HAS_RTLSDR, HAS_HACKRF, HAS_UHD, probe_gpsd
+from capabilities import HAS_RTLSDR, probe_gpsd
 
 log = logging.getLogger(__name__)
 
@@ -75,8 +75,6 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         return templates.TemplateResponse(request, "index.html", {
             "config": config,
             "has_rtlsdr": HAS_RTLSDR,
-            "has_hackrf": HAS_HACKRF,
-            "has_usrp": HAS_UHD,
             "has_gpsd": probe_gpsd(config.location.gpsd_host, config.location.gpsd_port),
             "version": __version__,
         })
@@ -326,58 +324,6 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         r = getattr(receiver, "_receiver", receiver) if receiver else None
         if r is None or not hasattr(r, "revert_gain_preview"):
             return JSONResponse({"ok": False, "error": "RTL-SDR not active"}, status_code=400)
-        ok = r.revert_gain_preview()
-        return {"ok": ok}
-
-    @router.post("/api/hackrf/gain/preview")
-    async def hackrf_gain_preview(request: Request):
-        data = await request.json() if await request.body() else {}
-        try:
-            lna = int(data.get("lna_gain", 16))
-            vga = int(data.get("vga_gain", 20))
-            amp = bool(data.get("amp", False))
-            # Clamp to valid ranges and step sizes
-            lna = max(0, min(40, round(lna / 8) * 8))
-            vga = max(0, min(62, round(vga / 2) * 2))
-        except (TypeError, ValueError):
-            return JSONResponse({"ok": False, "error": "Invalid gain values"}, status_code=400)
-        r = getattr(receiver, "_receiver", receiver) if receiver else None
-        if r is None or not hasattr(r, "apply_gain_preview") or r.__class__.__name__ != "HackRFReceiver":
-            return {"ok": False, "error": "HackRF not active"}
-        ok = r.apply_gain_preview(lna, vga, amp)
-        if not ok:
-            return {"ok": False, "error": "HackRF device not open"}
-        return {"ok": True}
-
-    @router.post("/api/hackrf/gain/revert")
-    def hackrf_gain_revert():
-        r = getattr(receiver, "_receiver", receiver) if receiver else None
-        if r is None or not hasattr(r, "revert_gain_preview") or r.__class__.__name__ != "HackRFReceiver":
-            return JSONResponse({"ok": False, "error": "HackRF not active"}, status_code=400)
-        ok = r.revert_gain_preview()
-        return {"ok": ok}
-
-    @router.post("/api/usrp/gain/preview")
-    async def usrp_gain_preview(request: Request):
-        data = await request.json() if await request.body() else {}
-        try:
-            gain = float(data.get("gain", 40.0))
-            gain = max(0.0, min(76.0, gain))
-        except (TypeError, ValueError):
-            return JSONResponse({"ok": False, "error": "Invalid gain value"}, status_code=400)
-        r = getattr(receiver, "_receiver", receiver) if receiver else None
-        if r is None or not hasattr(r, "apply_gain_preview") or r.__class__.__name__ != "USRPReceiver":
-            return {"ok": False, "error": "USRP not active"}
-        ok = r.apply_gain_preview(gain)
-        if not ok:
-            return {"ok": False, "error": "USRP device not open"}
-        return {"ok": True}
-
-    @router.post("/api/usrp/gain/revert")
-    def usrp_gain_revert():
-        r = getattr(receiver, "_receiver", receiver) if receiver else None
-        if r is None or not hasattr(r, "revert_gain_preview") or r.__class__.__name__ != "USRPReceiver":
-            return JSONResponse({"ok": False, "error": "USRP not active"}, status_code=400)
         ok = r.revert_gain_preview()
         return {"ok": ok}
 

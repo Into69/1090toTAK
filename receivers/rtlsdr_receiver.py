@@ -195,7 +195,7 @@ class RTLSDRReceiver(BaseReceiver):
         self._process_iq(samples)
 
     def _process_iq(self, samples) -> None:
-        """Process a buffer of complex IQ samples (shared with HackRFReceiver)."""
+        """Process a buffer of complex IQ samples."""
         # DC block — RTL-SDR zero-IF leaks a tuner DC component that biases
         # magnitude, drowns preamble detection in false positives, and
         # produces a fat spike in the centre of the spectrum display.

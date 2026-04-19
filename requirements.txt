@@ -10,8 +10,3 @@ psutil>=5.9.0
 #   Windows: place rtlsdr.dll on PATH or in project root
 #   Linux:   sudo apt install librtlsdr-dev
 #   macOS:   brew install librtlsdr
-# pip install hackrf numpy     # HackRF One
-# uhd — USRP B205mini/B206mini support. Typically installed via system package:
-#   Ubuntu/Debian: sudo apt install python3-uhd
-#   Conda:         conda install -c conda-forge uhd
-#   PyPI:          pip install uhd  (requires system UHD library present)

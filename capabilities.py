@@ -25,21 +25,6 @@ except (ImportError, OSError):
     except ImportError:
         HAS_RTLSDR = False
 
-try:
-    import hackrf as _hackrf_mod  # noqa: F401
-    HAS_HACKRF = True
-except ImportError:
-    HAS_HACKRF = False
-
-try:
-    import uhd as _uhd_mod  # noqa: F401
-    _ = _uhd_mod.usrp.MultiUSRP  # verify the binding we actually use
-    HAS_UHD = True
-    del _
-except (ImportError, AttributeError):
-    HAS_UHD = False
-
-
 def probe_gpsd(host: str = "127.0.0.1", port: int = 2947, timeout: float = 1.0) -> bool:
     """Return True if a gpsd socket is reachable at host:port."""
     import socket

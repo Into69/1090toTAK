@@ -10,8 +10,7 @@ RECEIVER_AVR           = "avr"            # dump1090 TCP port 30002 (AVR raw fra
 RECEIVER_AVR_SUBPROCESS = "avr_subprocess" # spawn rtl_adsb, read AVR frames from stdout
 RECEIVER_RTLSDR        = "rtlsdr"         # Direct RTL-SDR via built-in ctypes / librtlsdr
 RECEIVER_JSON          = "json"           # dump1090 / tar1090 HTTP JSON API
-RECEIVER_HACKRF        = "hackrf"         # Direct HackRF One via hackrf library
-RECEIVER_USRP          = "usrp"           # Direct USRP B205mini/B206mini via uhd
+RECEIVER_BEAST         = "beast"          # dump1090 / readsb TCP port 30005 (Beast binary)
 
 TAK_UDP       = "udp"
 TAK_MULTICAST = "multicast"
@@ -35,21 +34,13 @@ class ReceiverConfig:
     host: str = "127.0.0.1"
     sbs_port: int = 30003
     avr_port: int = 30002
+    beast_port: int = 30005
     json_port: int = 8080
     rtlsdr_gain: float = 49.6
     rtlsdr_agc: bool = False
     rtlsdr_ppm: int = 0
     rtlsdr_device_index: int = 0
     rtlsdr_bias_tee: bool = False   # only meaningful on RTL-SDR Blog V3/V4
-    hackrf_device_index: int = 0
-    hackrf_lna_gain: int = 16     # 0-40 dB, steps of 8
-    hackrf_vga_gain: int = 20     # 0-62 dB, steps of 2
-    hackrf_amp: bool = False      # built-in amplifier (~14 dB)
-    hackrf_ppm: int = 0
-    usrp_serial: str = ""         # empty = first found B2xx device
-    usrp_gain: float = 40.0       # 0-76 dB, continuous
-    usrp_antenna: str = "RX2"     # "RX2" or "TX/RX"
-    usrp_ppm: int = 0
 
 
 @dataclass

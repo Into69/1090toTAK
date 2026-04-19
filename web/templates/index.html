@@ -650,41 +650,16 @@
                 </div>
               </div>
               {% endif %}
-              {% if not has_hackrf %}
-              <div class="col-12">
-                <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
-                  <i class="bi bi-info-circle me-1"></i>
-                  <strong>hackrf not installed.</strong>
-                  Direct HackRF source is unavailable.
-                  <code style="display:block;margin-top:4px;">pip install hackrf</code>
-                </div>
-              </div>
-              {% endif %}
-              {% if not has_usrp %}
-              <div class="col-12">
-                <div class="alert alert-secondary p-2 mb-0" style="font-size:0.75rem;">
-                  <i class="bi bi-info-circle me-1"></i>
-                  <strong>uhd not installed.</strong>
-                  Direct USRP B205mini/B206mini source is unavailable.
-                  <code style="display:block;margin-top:4px;">sudo apt install python3-uhd  # or: pip install uhd</code>
-                </div>
-              </div>
-              {% endif %}
               <div class="col-md-6">
                 <label class="form-label">Source Type</label>
                 <select class="form-select form-select-sm" id="cfg-receiver-type">
                   <option value="sbs">SBS (port 30003)</option>
                   <option value="avr">AVR Raw (port 30002)</option>
+                  <option value="beast">Beast binary (port 30005) — readsb / dump1090</option>
                   <option value="json">JSON API (port 8080) — richest data</option>
                   <option value="avr_subprocess">Direct RTL-SDR (rtl_adsb subprocess)</option>
                   <option value="rtlsdr"{% if not has_rtlsdr %} disabled{% endif %}>
                     Direct RTL-SDR (librtlsdr){% if not has_rtlsdr %} — requires librtlsdr{% endif %}
-                  </option>
-                  <option value="hackrf"{% if not has_hackrf %} disabled{% endif %}>
-                    Direct HackRF One{% if not has_hackrf %} — requires hackrf{% endif %}
-                  </option>
-                  <option value="usrp"{% if not has_usrp %} disabled{% endif %}>
-                    Direct USRP B205mini / B206mini{% if not has_usrp %} — requires uhd{% endif %}
                   </option>
                 </select>
               </div>
@@ -700,6 +675,10 @@
               <div class="col-md-6" id="row-avr-port">
                 <label class="form-label">AVR Port</label>
                 <input type="number" class="form-control form-control-sm" id="cfg-avr-port" value="30002"/>
+              </div>
+              <div class="col-md-6" id="row-beast-port" style="display:none;">
+                <label class="form-label">Beast Port</label>
+                <input type="number" class="form-control form-control-sm" id="cfg-beast-port" value="30005"/>
               </div>
               <div class="col-md-6" id="row-json-port" style="display:none;">
                 <label class="form-label">JSON API Port</label>
@@ -756,92 +735,10 @@
                   <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
                 </div>
               </div>
-              <!-- HackRF settings (shown only when source = hackrf) -->
-              <div id="row-hackrf" style="display:none;" class="col-12">
-                <div class="row g-2">
-                  <div class="col-md-3">
-                    <label class="form-label">Device Index</label>
-                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-device"
-                           value="0" min="0" max="7" step="1"/>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">LNA Gain (dB)</label>
-                    <select class="form-select form-select-sm" id="cfg-hackrf-lna">
-                      <option value="0">0</option>
-                      <option value="8">8</option>
-                      <option value="16" selected>16</option>
-                      <option value="24">24</option>
-                      <option value="32">32</option>
-                      <option value="40">40</option>
-                    </select>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">VGA Gain (dB)</label>
-                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-vga"
-                           value="20" step="2" min="0" max="62"/>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">PPM Correction</label>
-                    <input type="number" class="form-control form-control-sm" id="cfg-hackrf-ppm" value="0"/>
-                  </div>
-                  <div class="col-md-3">
-                    <label class="form-label">&nbsp;</label>
-                    <div class="form-check form-switch" style="padding-top:3px;">
-                      <input class="form-check-input" type="checkbox" id="cfg-hackrf-amp">
-                      <label class="form-check-label" for="cfg-hackrf-amp">RF Amplifier (~14 dB)</label>
-                    </div>
-                  </div>
-                </div>
-                <!-- HackRF gain preview bar -->
-                <div id="hackrf-gain-preview-bar" style="display:none;margin-top:7px;padding:6px 10px;
-                     background:#0d1520;border:1px solid #4e8fd6;border-radius:4px;
-                     font-size:0.72rem;color:#cdd0d5;display:none;align-items:center;gap:8px;">
-                  <i class="bi bi-lightning-charge-fill" style="color:#4e8fd6;flex-shrink:0;"></i>
-                  <span>Preview active — gain applied to live device</span>
-                  <span id="hackrf-gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
-                  <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
-                </div>
-              </div>
-              <!-- USRP settings (shown only when source = usrp) -->
-              <div id="row-usrp" style="display:none;" class="col-12">
-                <div class="row g-2">
-                  <div class="col-md-4">
-                    <label class="form-label">Device Serial</label>
-                    <input type="text" class="form-control form-control-sm" id="cfg-usrp-serial"
-                           placeholder="Leave blank for first found"/>
-                    <div style="font-size:0.68rem;color:#556677;margin-top:2px;">B205mini, B206mini, or any B2xx</div>
-                  </div>
-                  <div class="col-md-4">
-                    <label class="form-label">RX Gain (dB) &nbsp;<span id="cfg-usrp-gain-lbl" style="color:#8899aa;font-family:monospace;">40.0</span></label>
-                    <input type="range" class="form-range" id="cfg-usrp-gain"
-                           value="40" step="0.5" min="0" max="76"/>
-                  </div>
-                  <div class="col-md-2">
-                    <label class="form-label">Antenna</label>
-                    <select class="form-select form-select-sm" id="cfg-usrp-antenna">
-                      <option value="RX2" selected>RX2</option>
-                      <option value="TX/RX">TX/RX</option>
-                    </select>
-                  </div>
-                  <div class="col-md-2">
-                    <label class="form-label">PPM Correction</label>
-                    <input type="number" class="form-control form-control-sm" id="cfg-usrp-ppm" value="0"/>
-                  </div>
-                </div>
-                <!-- USRP gain preview bar -->
-                <div id="usrp-gain-preview-bar" style="display:none;margin-top:7px;padding:6px 10px;
-                     background:#0d1520;border:1px solid #4e8fd6;border-radius:4px;
-                     font-size:0.72rem;color:#cdd0d5;align-items:center;gap:8px;">
-                  <i class="bi bi-lightning-charge-fill" style="color:#4e8fd6;flex-shrink:0;"></i>
-                  <span>Preview active — gain applied to live device</span>
-                  <span id="usrp-gain-preview-label" style="font-family:monospace;color:#8899aa;"></span>
-                  <span style="color:#6677aa;margin-left:auto;font-size:0.68rem;">Cancel to revert</span>
-                </div>
-              </div>
               <div id="row-spectrum-enabled" style="display:none;" class="col-12">
                 <div class="form-check form-switch">
                   <input class="form-check-input" type="checkbox" id="cfg-spectrum-enabled"
-                         onchange="const t=document.getElementById('cfg-receiver-type').value; const hasSdr=(t==='rtlsdr'||t==='hackrf'||t==='usrp'); document.getElementById('row-spectrum-tab').style.display = (hasSdr && this.checked) ? '' : 'none';"/>
+                         onchange="const t=document.getElementById('cfg-receiver-type').value; const hasSdr=(t==='rtlsdr'); document.getElementById('row-spectrum-tab').style.display = (hasSdr && this.checked) ? '' : 'none';"/>
                   <label class="form-check-label" for="cfg-spectrum-enabled">
                     Live Spectrum &amp; Waterfall
                     <span style="color:#8899aa;font-size:0.72rem;display:block;">
@@ -2838,6 +2735,7 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-receiver-host").value = cfg.receiver?.host || "127.0.0.1";
   document.getElementById("cfg-sbs-port").value  = cfg.receiver?.sbs_port  || 30003;
   document.getElementById("cfg-avr-port").value  = cfg.receiver?.avr_port  || 30002;
+  document.getElementById("cfg-beast-port").value = cfg.receiver?.beast_port || 30005;
   document.getElementById("cfg-json-port").value = cfg.receiver?.json_port || 8080;
   // device index — set after dropdown is populated
   document.getElementById("cfg-rtlsdr-device").dataset.pending = cfg.receiver?.rtlsdr_device_index ?? 0;
@@ -2845,17 +2743,6 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-rtlsdr-gain").value   = cfg.receiver?.rtlsdr_gain ?? 49.6;
   document.getElementById("cfg-rtlsdr-ppm").value    = cfg.receiver?.rtlsdr_ppm ?? 0;
   document.getElementById("cfg-rtlsdr-bias-tee").checked = cfg.receiver?.rtlsdr_bias_tee || false;
-  document.getElementById("cfg-hackrf-device").value = cfg.receiver?.hackrf_device_index ?? 0;
-  document.getElementById("cfg-hackrf-lna").value    = cfg.receiver?.hackrf_lna_gain ?? 16;
-  document.getElementById("cfg-hackrf-vga").value    = cfg.receiver?.hackrf_vga_gain ?? 20;
-  document.getElementById("cfg-hackrf-ppm").value    = cfg.receiver?.hackrf_ppm ?? 0;
-  document.getElementById("cfg-hackrf-amp").checked  = cfg.receiver?.hackrf_amp || false;
-  const usrpGain = cfg.receiver?.usrp_gain ?? 40.0;
-  document.getElementById("cfg-usrp-serial").value   = cfg.receiver?.usrp_serial ?? "";
-  document.getElementById("cfg-usrp-gain").value     = usrpGain;
-  document.getElementById("cfg-usrp-gain-lbl").textContent = parseFloat(usrpGain).toFixed(1);
-  document.getElementById("cfg-usrp-antenna").value  = cfg.receiver?.usrp_antenna ?? "RX2";
-  document.getElementById("cfg-usrp-ppm").value      = cfg.receiver?.usrp_ppm ?? 0;
   document.getElementById("cfg-ttl").value = cfg.aircraft_ttl || 60;
   document.getElementById("cfg-history-ttl").value = cfg.history_ttl || 86400;
 
@@ -2978,127 +2865,18 @@ function cancelGainPreview() {
   fetch("/api/rtlsdr/gain/revert", { method: "POST" }).catch(() => {});
 }
 
-// ── HackRF gain preview ───────────────────────────────────────────────────
-let hackrfGainPreviewActive = false;
-let hackrfGainPreviewTimer  = null;
-let hackrfGainOriginal = { lna: 16, vga: 20, amp: false };
-
-function hideHackrfGainPreviewBar() {
-  const bar = document.getElementById("hackrf-gain-preview-bar");
-  if (bar) bar.style.display = "none";
-}
-
-function showHackrfGainPreviewBar(lna, vga, amp) {
-  const bar   = document.getElementById("hackrf-gain-preview-bar");
-  const label = document.getElementById("hackrf-gain-preview-label");
-  if (!bar) return;
-  label.textContent = `LNA ${lna} dB  VGA ${vga} dB${amp ? "  +Amp" : ""}`;
-  bar.style.display = "flex";
-}
-
-function scheduleHackrfGainPreview() {
-  if (document.getElementById("cfg-receiver-type").value !== "hackrf") return;
-  clearTimeout(hackrfGainPreviewTimer);
-  hackrfGainPreviewTimer = setTimeout(() => {
-    const lna = parseInt(document.getElementById("cfg-hackrf-lna").value);
-    const vga = parseInt(document.getElementById("cfg-hackrf-vga").value);
-    const amp = document.getElementById("cfg-hackrf-amp").checked;
-    fetch("/api/hackrf/gain/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lna_gain: lna, vga_gain: vga, amp }),
-    })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        hackrfGainPreviewActive = true;
-        showHackrfGainPreviewBar(lna, vga, amp);
-      } else {
-        showToast("HackRF gain preview unavailable: " + (d.error || "device not active"), "warning");
-      }
-    })
-    .catch(() => showToast("HackRF gain preview request failed", "warning"));
-  }, 1000);
-}
-
-function cancelHackrfGainPreview() {
-  clearTimeout(hackrfGainPreviewTimer);
-  if (!hackrfGainPreviewActive) return;
-  hackrfGainPreviewActive = false;
-  hideHackrfGainPreviewBar();
-  document.getElementById("cfg-hackrf-lna").value   = hackrfGainOriginal.lna;
-  document.getElementById("cfg-hackrf-vga").value   = hackrfGainOriginal.vga;
-  document.getElementById("cfg-hackrf-amp").checked = hackrfGainOriginal.amp;
-  fetch("/api/hackrf/gain/revert", { method: "POST" }).catch(() => {});
-}
-
-// ── USRP gain preview ─────────────────────────────────────────────────────
-let usrpGainPreviewActive = false;
-let usrpGainPreviewTimer  = null;
-let usrpGainOriginal = 40.0;
-
-function hideUsrpGainPreviewBar() {
-  const bar = document.getElementById("usrp-gain-preview-bar");
-  if (bar) bar.style.display = "none";
-}
-
-function showUsrpGainPreviewBar(gain) {
-  const bar   = document.getElementById("usrp-gain-preview-bar");
-  const label = document.getElementById("usrp-gain-preview-label");
-  if (!bar) return;
-  label.textContent = `${parseFloat(gain).toFixed(1)} dB`;
-  bar.style.display = "flex";
-}
-
-function scheduleUsrpGainPreview() {
-  if (document.getElementById("cfg-receiver-type").value !== "usrp") return;
-  clearTimeout(usrpGainPreviewTimer);
-  usrpGainPreviewTimer = setTimeout(() => {
-    const gain = parseFloat(document.getElementById("cfg-usrp-gain").value);
-    document.getElementById("cfg-usrp-gain-lbl").textContent = gain.toFixed(1);
-    fetch("/api/usrp/gain/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gain }),
-    })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        usrpGainPreviewActive = true;
-        showUsrpGainPreviewBar(gain);
-      } else {
-        showToast("USRP gain preview unavailable: " + (d.error || "device not active"), "warning");
-      }
-    })
-    .catch(() => {});
-  }, 300);
-}
-
-function cancelUsrpGainPreview() {
-  clearTimeout(usrpGainPreviewTimer);
-  if (!usrpGainPreviewActive) return;
-  usrpGainPreviewActive = false;
-  hideUsrpGainPreviewBar();
-  document.getElementById("cfg-usrp-gain").value = usrpGainOriginal;
-  document.getElementById("cfg-usrp-gain-lbl").textContent = parseFloat(usrpGainOriginal).toFixed(1);
-  fetch("/api/usrp/gain/revert", { method: "POST" }).catch(() => {});
-}
-
 function updateReceiverFields() {
   const type = document.getElementById("cfg-receiver-type").value;
-  const hasHost = type === "sbs" || type === "avr" || type === "json";
+  const hasHost = type === "sbs" || type === "avr" || type === "json" || type === "beast";
   const hasSdr = type === "rtlsdr" || type === "avr_subprocess";
-  const hasHackrf = type === "hackrf";
-  const hasUsrp = type === "usrp";
   document.getElementById("row-receiver-host").style.display = hasHost ? "" : "none";
   document.getElementById("row-sbs-port").style.display      = type === "sbs"  ? "" : "none";
   document.getElementById("row-avr-port").style.display      = type === "avr"  ? "" : "none";
+  document.getElementById("row-beast-port").style.display    = type === "beast" ? "" : "none";
   document.getElementById("row-json-port").style.display     = type === "json" ? "" : "none";
   const sdrWasHidden = document.getElementById("row-rtlsdr").style.display === "none";
   document.getElementById("row-rtlsdr").style.display        = hasSdr ? "" : "none";
-  document.getElementById("row-hackrf").style.display        = hasHackrf ? "" : "none";
-  document.getElementById("row-usrp").style.display          = hasUsrp ? "" : "none";
-  const hasSpectrum = (type === "rtlsdr" || type === "hackrf" || type === "usrp");
+  const hasSpectrum = (type === "rtlsdr");
   document.getElementById("row-spectrum-enabled").style.display = hasSpectrum ? "" : "none";
   // Only show the live spectrum display if the receiver supports it AND the feature is enabled.
   document.getElementById("row-spectrum-tab").style.display  = (hasSpectrum && spectrumFeatureEnabled) ? "" : "none";
@@ -3142,8 +2920,6 @@ function updateAgcToggle() {
 document.getElementById("cfg-receiver-type").addEventListener("change", () => {
   updateReceiverFields();
   cancelGainPreview();        // cancel RTL-SDR preview when switching away
-  cancelHackrfGainPreview();  // cancel HackRF preview when switching away
-  cancelUsrpGainPreview();    // cancel USRP preview when switching away
 });
 document.getElementById("cfg-rtlsdr-agc").addEventListener("change", () => {
   updateAgcToggle();
@@ -3151,10 +2927,6 @@ document.getElementById("cfg-rtlsdr-agc").addEventListener("change", () => {
 });
 document.getElementById("cfg-rtlsdr-gain").addEventListener("input", scheduleGainPreview);
 document.getElementById("rtlsdr-refresh-btn").addEventListener("click", refreshRtlsdrDevices);
-document.getElementById("cfg-hackrf-lna").addEventListener("change", scheduleHackrfGainPreview);
-document.getElementById("cfg-hackrf-vga").addEventListener("input", scheduleHackrfGainPreview);
-document.getElementById("cfg-hackrf-amp").addEventListener("change", scheduleHackrfGainPreview);
-document.getElementById("cfg-usrp-gain").addEventListener("input", scheduleUsrpGainPreview);
 document.getElementById("spectrum-peak-reset").addEventListener("click", () => {
   spectrumPeak = spectrumData ? [...spectrumData] : null;
   drawSpectrum();
@@ -3180,12 +2952,6 @@ document.getElementById("settings-modal").addEventListener("show.bs.modal", () =
         agc:  cfg.receiver?.rtlsdr_agc  ?? false,
         gain: cfg.receiver?.rtlsdr_gain ?? 49.6,
       };
-      hackrfGainOriginal = {
-        lna: cfg.receiver?.hackrf_lna_gain ?? 16,
-        vga: cfg.receiver?.hackrf_vga_gain ?? 20,
-        amp: cfg.receiver?.hackrf_amp ?? false,
-      };
-      usrpGainOriginal = cfg.receiver?.usrp_gain ?? 40.0;
       rangeRingsOpacityOriginal = rangeRingsOpacity;
       rangeRingsColorOriginal = rangeRingsColor;
       rangeRingsUnitsOriginal = rangeRingsUnits;
@@ -3262,21 +3028,13 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       host:                  document.getElementById("cfg-receiver-host").value,
       sbs_port:              parseInt(document.getElementById("cfg-sbs-port").value),
       avr_port:              parseInt(document.getElementById("cfg-avr-port").value),
+      beast_port:            parseInt(document.getElementById("cfg-beast-port").value),
       json_port:             parseInt(document.getElementById("cfg-json-port").value),
       rtlsdr_device_index:   parseInt(document.getElementById("cfg-rtlsdr-device").value),
       rtlsdr_agc:            document.getElementById("cfg-rtlsdr-agc").checked,
       rtlsdr_gain:           parseFloat(document.getElementById("cfg-rtlsdr-gain").value),
       rtlsdr_ppm:            parseInt(document.getElementById("cfg-rtlsdr-ppm").value),
       rtlsdr_bias_tee:       document.getElementById("cfg-rtlsdr-bias-tee").checked,
-      hackrf_device_index:   parseInt(document.getElementById("cfg-hackrf-device").value),
-      hackrf_lna_gain:       parseInt(document.getElementById("cfg-hackrf-lna").value),
-      hackrf_vga_gain:       parseInt(document.getElementById("cfg-hackrf-vga").value),
-      hackrf_ppm:            parseInt(document.getElementById("cfg-hackrf-ppm").value),
-      hackrf_amp:            document.getElementById("cfg-hackrf-amp").checked,
-      usrp_serial:           document.getElementById("cfg-usrp-serial").value.trim(),
-      usrp_gain:             parseFloat(document.getElementById("cfg-usrp-gain").value),
-      usrp_antenna:          document.getElementById("cfg-usrp-antenna").value,
-      usrp_ppm:              parseInt(document.getElementById("cfg-usrp-ppm").value),
     },
     tak: {
       enabled:  document.getElementById("cfg-tak-enabled").checked,
@@ -3608,6 +3366,66 @@ function drawRangeRings() {
 // ============================================================
 // WEATHER OVERLAY
 // ============================================================
+// Custom TileLayer that pre-loads extra tiles around the viewport.
+// Weather tile servers (RainViewer especially) sometimes drop the
+// bottom-right tile when many requests fire at once on a pan/zoom;
+// expanding the load bounds gives us margin so missing tiles aren't
+// at the edge of what the user sees.
+const BufferedTileLayer = L.TileLayer.extend({
+  options: {
+    tileBuffer: 1,    // extra tiles in each direction
+    maxRetries: 3,    // re-try failed tile downloads before giving up
+  },
+  _getTiledPixelBounds: function (center) {
+    const bounds = L.TileLayer.prototype._getTiledPixelBounds.call(this, center);
+    const buf = this.options.tileBuffer * this.getTileSize().x;
+    return new L.Bounds(
+      bounds.min.subtract([buf, buf]),
+      bounds.max.add([buf, buf])
+    );
+  },
+  createTile: function (coords, done) {
+    const tile = L.TileLayer.prototype.createTile.call(this, coords, done);
+    // Stash original URL so retries can rebuild it without piling on cache-bust params
+    tile.dataset._baseUrl = tile.src;
+    return tile;
+  },
+  _tileOnError: function (done, tile, e) {
+    const retries = parseInt(tile.dataset._retries || "0", 10);
+    const max = this.options.maxRetries || 0;
+    if (retries < max) {
+      tile.dataset._retries = String(retries + 1);
+      // Exponential-ish backoff with jitter so a burst of failures doesn't hammer the server
+      const delay = 400 * (retries + 1) + Math.random() * 300;
+      setTimeout(() => {
+        const baseUrl = tile.dataset._baseUrl || tile.src;
+        const sep = baseUrl.includes("?") ? "&" : "?";
+        tile.src = baseUrl + sep + "_retry=" + (retries + 1);
+      }, delay);
+      return;
+    }
+    // Out of retries — fall through to Leaflet's default (errorTileUrl, fire tileerror, done(err))
+    L.TileLayer.prototype._tileOnError.call(this, done, tile, e);
+  },
+});
+const bufferedTileLayer = (url, opts) => {
+  const layer = new BufferedTileLayer(url, opts);
+  // Surface tile-download health in the status badge per Leaflet load cycle.
+  // tileerror fires only after BufferedTileLayer has exhausted its retries.
+  let _failed = 0;
+  layer.on("loading", () => { _failed = 0; });
+  layer.on("tileerror", () => { _failed++; });
+  layer.on("load", () => {
+    if (layer._statusLocked) return;
+    if (_failed > 0) {
+      setWeatherStatus("warn", `${_failed} tile${_failed === 1 ? "" : "s"} failed`);
+    } else {
+      setWeatherStatus("ok", "Connected");
+    }
+  });
+  return layer;
+};
+
 let weatherEnabled = {{ 'true' if config.web.weather_overlay else 'false' }};
 let weatherLayerType = "{{ config.web.weather_layer | default('radar') }}";
 let weatherOpacity = {{ config.web.weather_opacity | default(0.5) }};
@@ -3660,19 +3478,23 @@ function _applyOwmTiles() {
     return;
   }
   const url = `https://tile.openweathermap.org/map/${owmLayer}/{z}/{x}/{y}.png?appid=${encodeURIComponent(key)}`;
-  weatherTileLayer = L.tileLayer(url, {
+  weatherTileLayer = bufferedTileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
     attribution: '\u00a9 OpenWeatherMap',
     pane: "overlayPane",
     tileSize: 256,
+    tileBuffer: 2,
+    keepBuffer: 4,
   }).addTo(map);
-  // Probe a sample tile to detect 401 (invalid key) early
+  // Probe a sample tile to detect 401 (invalid key) early. If we get a sticky
+  // error here, suppress later load-cycle status updates so the specific message survives.
+  const layerRef = weatherTileLayer;
   fetch(`https://tile.openweathermap.org/map/${owmLayer}/0/0/0.png?appid=${encodeURIComponent(key)}`, { method: "GET", mode: "cors" })
     .then(r => {
-      if (r.status === 401) setWeatherStatus("error", "Invalid API key");
-      else if (!r.ok)       setWeatherStatus("error", "HTTP " + r.status);
-      else                  setWeatherStatus("ok", "Connected");
+      if (r.status === 401)      { setWeatherStatus("error", "Invalid API key"); layerRef._statusLocked = true; }
+      else if (!r.ok)            { setWeatherStatus("error", "HTTP " + r.status); layerRef._statusLocked = true; }
+      else                       setWeatherStatus("ok", "Connected");
     })
     .catch(() => setWeatherStatus("ok", "Connected"));  // assume ok if probe network-fails
 }
@@ -3683,6 +3505,7 @@ function setWeatherStatus(status, text) {
   badge.textContent = text;
   badge.className = "badge " + ({
     ok:      "bg-success",
+    warn:    "bg-warning text-dark",
     error:   "bg-danger",
     loading: "bg-warning text-dark",
     off:     "bg-secondary",
@@ -3707,11 +3530,13 @@ function _applyRainViewerTiles() {
   const url = _rvHost + _rvPath + "/256/{z}/{x}/{y}" + suffix;
   // 1x1 transparent PNG to replace any "zoom level not supported" tiles
   const blankTile = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
-  weatherTileLayer = L.tileLayer(url, {
+  weatherTileLayer = bufferedTileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
     maxNativeZoom: 7,    // RainViewer radar coverage degrades past z=7 in many regions
     minNativeZoom: 0,
+    tileBuffer: 2,
+    keepBuffer: 4,
     errorTileUrl: blankTile,
     attribution: '\u00a9 RainViewer',
     pane: "overlayPane",
@@ -3760,13 +3585,15 @@ function _applyGibsSatellite() {
   // Using "default" for Time pins to the server's latest frame automatically.
   const layer = "GOES-East_ABI_Band13_Clean_Infrared";
   const url = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layer}/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`;
-  weatherTileLayer = L.tileLayer(url, {
+  weatherTileLayer = bufferedTileLayer(url, {
     opacity: weatherOpacity,
     maxZoom: 19,
     maxNativeZoom: 5,
     minNativeZoom: 0,
     attribution: '\u00a9 NASA GIBS / GOES-East',
     pane: "overlayPane",
+    tileBuffer: 2,
+    keepBuffer: 4,
     tileSize: 256,
   }).addTo(map);
   setWeatherStatus("ok", "Connected");
@@ -3862,12 +3689,13 @@ function renderReceiverList(receivers) {
           <select class="form-select form-select-sm" style="width:100px;" data-rx="type">
             <option value="sbs"${r.type==="sbs"?" selected":""}>SBS</option>
             <option value="avr"${r.type==="avr"?" selected":""}>AVR</option>
+            <option value="beast"${r.type==="beast"?" selected":""}>Beast</option>
             <option value="json"${r.type==="json"?" selected":""}>JSON API</option>
           </select>
           <input type="text" class="form-control form-control-sm" style="flex:1;"
                  placeholder="Host" value="${r.host || "127.0.0.1"}" data-rx="host"/>
           <input type="number" class="form-control form-control-sm" style="width:80px;"
-                 placeholder="Port" value="${r.sbs_port || 30003}" data-rx="port"/>
+                 placeholder="Port" value="${r.beast_port || r.json_port || r.avr_port || r.sbs_port || 30003}" data-rx="port"/>
           <div class="form-check form-switch mb-0">
             <input class="form-check-input" type="checkbox" ${r.enabled !== false?"checked":""}
                    data-rx="enabled"/>
@@ -3885,7 +3713,7 @@ function collectReceiverList() {
   return Array.from(cards).map((card, i) => {
     const type = card.querySelector('[data-rx="type"]').value;
     const port = parseInt(card.querySelector('[data-rx="port"]').value) || 30003;
-    const portKey = type === "json" ? "json_port" : type === "avr" ? "avr_port" : "sbs_port";
+    const portKey = type === "json" ? "json_port" : type === "avr" ? "avr_port" : type === "beast" ? "beast_port" : "sbs_port";
     return {
       id: "rx" + i,
       label: card.querySelector('[data-rx="label"]').value || ("Receiver " + (i+1)),
