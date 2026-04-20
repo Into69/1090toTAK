@@ -106,7 +106,12 @@ class AlertConfig:
     enabled: bool = True
     auto_select: bool = False
     emergency_squawks: bool = True
-    rules: list = field(default_factory=list)  # [{name, type, value, enabled}]
+    military: bool = False       # Alert on aircraft from known military ICAO ranges
+    helicopters: bool = False    # Alert on rotorcraft (ADS-B emitter category A7)
+    squawk_change: bool = False  # Alert when an aircraft changes its transponder squawk
+    discord_webhook: str = ""    # Discord webhook URL for alert notifications
+    rules: list = field(default_factory=list)     # [{name, type, value, enabled}]
+    watchlist: list = field(default_factory=list) # [{icao, label}]
 
 
 @dataclass

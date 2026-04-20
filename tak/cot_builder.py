@@ -84,7 +84,7 @@ class CotBuilder:
 
         uid = f"ADSB-{aircraft.icao}"
         cot_type = _cot_type(aircraft)
-        callsign = aircraft.callsign or aircraft.icao
+        callsign = aircraft.callsign or f"ADSB - {aircraft.icao}"
 
         lat = aircraft.lat or 0.0
         lon = aircraft.lon or 0.0

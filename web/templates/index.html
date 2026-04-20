@@ -330,6 +330,13 @@
       border-radius: 6px; padding: 4px 10px;
       font-size: 0.72rem; color: #8899aa; pointer-events: none;
     }
+    #zoom-indicator {
+      position: absolute; top: 12px; left: 50px; z-index: 1000;
+      background: rgba(13,15,17,0.85); border: 1px solid #2c2f33;
+      border-radius: 6px; padding: 2px 8px;
+      font-size: 0.7rem; color: #8899aa; pointer-events: none;
+      font-family: monospace;
+    }
 
     /* ── Mobile UI ─────────────────────────────────────────── */
     body.mobile-ui .navbar { height: 44px; min-height: 44px; }
@@ -496,10 +503,23 @@
           </select>
         </div>
       </div>
+      <!-- Row 3: Search -->
+      <div class="hist-row">
+        <i class="bi bi-search" style="color:#8899aa;"></i>
+        <input type="text" id="hist-search" class="form-control form-control-sm py-0"
+               placeholder="Filter by ICAO or callsign…"
+               style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:240px;"
+               autocomplete="off"/>
+        <button id="hist-search-clear" class="btn btn-xs btn-outline-secondary py-0 px-2" title="Clear search" style="display:none;">×</button>
+        <span id="hist-search-count" style="font-size:0.72rem;color:#8899aa;"></span>
+      </div>
     </div>
 
     <!-- History aircraft count badge -->
     <div id="hist-ac-badge" class="d-none">— aircraft</div>
+
+    <!-- Zoom level indicator -->
+    <div id="zoom-indicator" title="Map zoom level">Z —</div>
 
     <!-- RTL-SDR signal quality popup (bottom-left) -->
     <div id="signal-quality-popup">
@@ -1284,7 +1304,34 @@
                   <input class="form-check-input" type="checkbox" id="cfg-alerts-emergency"/>
                   <label class="form-check-label" for="cfg-alerts-emergency">
                     Emergency squawks (7500/7600/7700)
-                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Always alert on emergency transponder codes</span>
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert on hijack / radio failure / general emergency codes</span>
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-military"/>
+                  <label class="form-check-label" for="cfg-alerts-military">
+                    Military aircraft
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert on ICAO addresses in known US, UK, AU, CA, FR, DE, RU military ranges</span>
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-helicopters"/>
+                  <label class="form-check-label" for="cfg-alerts-helicopters">
+                    Helicopters / rotorcraft
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert on ADS-B emitter category A7 (rotorcraft)</span>
+                  </label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-squawk-change"/>
+                  <label class="form-check-label" for="cfg-alerts-squawk-change">
+                    Squawk changes
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert when an aircraft's transponder squawk code changes mid-flight</span>
                   </label>
                 </div>
               </div>
@@ -1295,10 +1342,33 @@
                 </div>
               </div>
               <div class="col-12">
+                <label class="form-label" for="cfg-alerts-discord">
+                  Discord Webhook URL
+                  <span style="color:#8899aa;font-size:0.72rem;display:block;font-weight:400;">
+                    Send each alert to a Discord channel. Leave blank to disable.
+                    <a href="#" id="btn-test-discord" style="color:#5bc0eb;margin-left:4px;">Send test</a>
+                  </span>
+                </label>
+                <input type="text" class="form-control form-control-sm" id="cfg-alerts-discord"
+                       placeholder="https://discord.com/api/webhooks/..." autocomplete="off"/>
+              </div>
+              <div class="col-12">
                 <label class="form-label">Alert Rules</label>
                 <div id="alert-rules-list"></div>
                 <button class="btn btn-sm btn-outline-primary mt-2" id="btn-add-alert-rule">
                   <i class="bi bi-plus-circle me-1"></i>Add Rule
+                </button>
+              </div>
+              <div class="col-12">
+                <label class="form-label">
+                  Watchlist
+                  <span style="color:#8899aa;font-size:0.72rem;display:block;font-weight:400;">
+                    Alert whenever any of these specific aircraft is seen. ICAO is a 6-char hex code (e.g. A12345).
+                  </span>
+                </label>
+                <div id="watchlist-rows"></div>
+                <button class="btn btn-sm btn-outline-primary mt-2" id="btn-add-watchlist">
+                  <i class="bi bi-plus-circle me-1"></i>Add Aircraft
                 </button>
               </div>
             </div>
@@ -1418,6 +1488,22 @@ map.on("click", () => {
     renderTable();
   }
 });
+
+// Follow mode: when an aircraft is selected, the map auto-fits to track + position.
+// Any user pan/zoom releases the lock.
+let followLocked = false;
+const _breakFollow = () => { followLocked = false; };
+map.on("dragstart", _breakFollow);
+map.on("dblclick", _breakFollow);
+map.getContainer().addEventListener("wheel", _breakFollow, { passive: true });
+
+// Zoom-level indicator
+function _updateZoomIndicator() {
+  const el = document.getElementById("zoom-indicator");
+  if (el) el.textContent = "Z " + map.getZoom().toFixed(0);
+}
+map.on("zoomend", _updateZoomIndicator);
+_updateZoomIndicator();
 
 let currentTileLayer = null;
 
@@ -1623,11 +1709,24 @@ const CATEGORY_NAMES = {
   "C1": "Emergency veh", "C2": "Service veh", "C3": "Obstacle",
 };
 
+// Helicopter callsign heuristic — many rotorcraft never broadcast an ADS-B
+// identification frame, so emitter category A7 is unavailable. These prefixes
+// are well-known operator patterns (air ambulance, law enforcement, rescue,
+// general helicopter ops) and provide a fallback when category is missing.
+const HELI_CALLSIGN_RX = /^(LIFE|MEDIC|MEDEVAC|MEDIVAC|AIREVAC|STAT|HELI|HELO|HEMS|RESCUE|COAST|GUARDIAN|EAGLE|SKYKNIGHT|N\d+H|HAWK|FALCON|ANGEL|FLIGHT FOR LIFE|MERCY|SHEPHERD|OSPREY)\d*$/;
+
+function looksLikeHeli(ac) {
+  if (!ac || !ac.callsign) return false;
+  const cs = ac.callsign.trim().toUpperCase();
+  return HELI_CALLSIGN_RX.test(cs);
+}
+
 function iconKeyForAc(ac) {
   // "dot" mode is intentionally minimal — no category overrides
   if (iconType === "dot") return "dot";
   const cat = (ac.category || "").toUpperCase();
   if (cat && CATEGORY_ICON_MAP.hasOwnProperty(cat)) return CATEGORY_ICON_MAP[cat];
+  if (looksLikeHeli(ac)) return "heli";
   return iconType;
 }
 
@@ -1650,7 +1749,9 @@ const CATEGORY_COT_MAP = {
 function cotTypeForAc(ac) {
   if (ac.squawk && EMERGENCY_SQUAWKS.includes(ac.squawk)) return "a-u-A";
   const cat = (ac.category || "").toUpperCase();
-  return CATEGORY_COT_MAP[cat] || "a-f-A-M-F-Q";
+  if (CATEGORY_COT_MAP[cat]) return CATEGORY_COT_MAP[cat];
+  if (looksLikeHeli(ac)) return "a-f-A-M-H";
+  return "a-f-A-M-F-Q";
 }
 
 const COT_TO_SIDC = {
@@ -1887,32 +1988,47 @@ function clearTrack() {
     map.removeLayer(trackLayer);
     trackLayer = null;
   }
+  followLocked = false;
+}
+
+function fitToFollow() {
+  if (!followLocked) return;
+  const ac = aircraft[selectedIcao];
+  const cur = (ac && ac.lat != null) ? L.latLng(ac.lat, ac.lon) : null;
+  let bounds = trackLayer ? trackLayer.getBounds() : null;
+  if (cur) bounds = bounds && bounds.isValid() ? bounds.extend(cur) : L.latLngBounds([cur, cur]);
+  if (!bounds || !bounds.isValid()) return;
+  // Cap zoom-in so a stationary aircraft doesn't snap to street level
+  map.fitBounds(bounds.pad(0.2), { animate: true, maxZoom: 13 });
 }
 
 function fetchTrack(icao) {
-  clearTrack();
+  if (trackLayer) { map.removeLayer(trackLayer); trackLayer = null; }
   fetch(`/api/history/${icao}`)
     .then(r => r.json())
     .then(pts => {
-      if (pts.length < 2) return;
-      const latlngs = pts.map(p => [p.lat, p.lon]);
-      trackLayer = L.polyline(latlngs, {
-        color: "#5bc0eb",
-        weight: 2,
-        opacity: 0.7,
-        dashArray: null,
-      }).addTo(map);
+      if (pts.length >= 2) {
+        const latlngs = pts.map(p => [p.lat, p.lon]);
+        trackLayer = L.polyline(latlngs, {
+          color: "#5bc0eb",
+          weight: 2,
+          opacity: 0.7,
+          dashArray: null,
+        }).addTo(map);
+      }
+      fitToFollow();
     })
     .catch(() => {});
 }
 
 function selectAircraft(icao) {
   selectedIcao = icao;
+  followLocked = true;
   renderDetail(aircraft[icao]);
   renderTable(); // update highlight
   fetchTrack(icao);
 
-  // Pan to aircraft
+  // Initial pan for fast feedback; fitToFollow will refine once track loads
   const ac = aircraft[icao];
   if (ac && ac.lat != null) {
     map.panTo([ac.lat, ac.lon]);
@@ -1968,6 +2084,14 @@ function renderDetail(ac) {
   ];
 
   const emerg = isEmergency(ac) ? '<span class="badge bg-danger ms-2">EMERGENCY</span>' : "";
+  const watched = isOnWatchlist(ac.icao);
+  const watchBtn = `
+    <button id="btn-toggle-watch" class="btn btn-xs btn-sm float-end ms-1 ${watched ? "btn-warning" : "btn-outline-warning"}"
+            style="font-size:0.65rem;padding:1px 6px;"
+            onclick="toggleWatchlist('${ac.icao}')"
+            title="${watched ? "Remove from watchlist" : "Add to watchlist"}">
+      <i class="bi bi-${watched ? "star-fill" : "star"}"></i> Watch
+    </button>`;
   panel.innerHTML = `
     <h6>${ac.callsign ? fmtCallsign(ac.callsign) : ac.icao}${emerg}
       <button class="btn btn-xs btn-outline-warning btn-sm float-end"
@@ -1975,6 +2099,7 @@ function renderDetail(ac) {
               onclick="sendToTak('${ac.icao}')">
         <i class="bi bi-send"></i> TAK
       </button>
+      ${watchBtn}
     </h6>
     <div id="ac-photo" style="text-align:center;min-height:0;"></div>
     ${rows.map(([l,v]) => `
@@ -2013,6 +2138,8 @@ let aircraftTTL = {{ config.aircraft_ttl }};
 function applyAutoView() {
   if (!autoView) return;
   if (document.body.classList.contains("history-active")) return;
+  // Don't fight the follow-aircraft logic
+  if (followLocked && selectedIcao) return;
   const points = Object.values(aircraft)
     .filter(ac => ac.lat != null && ac.lon != null)
     .map(ac => [ac.lat, ac.lon]);
@@ -2118,6 +2245,20 @@ function connectWebSocket() {
 
         if (selectedIcao && aircraft[selectedIcao]) {
           renderDetail(aircraft[selectedIcao]);
+          // Follow mode: append new position to track and re-fit map
+          if (followLocked) {
+            const ac = aircraft[selectedIcao];
+            if (ac.lat != null) {
+              if (trackLayer) {
+                const pts = trackLayer.getLatLngs();
+                const last = pts.length ? pts[pts.length - 1] : null;
+                if (!last || last.lat !== ac.lat || last.lng !== ac.lon) {
+                  trackLayer.addLatLng([ac.lat, ac.lon]);
+                }
+              }
+              fitToFollow();
+            }
+          }
         }
         break;
       }
@@ -2792,7 +2933,12 @@ function loadSettingsForm(cfg) {
   // Alerts
   document.getElementById("cfg-alerts-enabled").checked = cfg.alerts?.enabled ?? true;
   document.getElementById("cfg-alerts-emergency").checked = cfg.alerts?.emergency_squawks ?? true;
+  document.getElementById("cfg-alerts-military").checked = cfg.alerts?.military || false;
+  document.getElementById("cfg-alerts-helicopters").checked = cfg.alerts?.helicopters || false;
+  document.getElementById("cfg-alerts-squawk-change").checked = cfg.alerts?.squawk_change || false;
   document.getElementById("cfg-alerts-autoselect").checked = cfg.alerts?.auto_select || false;
+  document.getElementById("cfg-alerts-discord").value = cfg.alerts?.discord_webhook || "";
+  renderWatchlist(cfg.alerts?.watchlist || []);
   renderAlertRules(cfg.alerts?.rules || []);
 
   // Multi-receiver
@@ -3074,8 +3220,13 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
     alerts: {
       enabled: document.getElementById("cfg-alerts-enabled").checked,
       emergency_squawks: document.getElementById("cfg-alerts-emergency").checked,
+      military: document.getElementById("cfg-alerts-military").checked,
+      helicopters: document.getElementById("cfg-alerts-helicopters").checked,
+      squawk_change: document.getElementById("cfg-alerts-squawk-change").checked,
       auto_select: document.getElementById("cfg-alerts-autoselect").checked,
+      discord_webhook: document.getElementById("cfg-alerts-discord").value.trim(),
       rules: collectAlertRules(),
+      watchlist: collectWatchlist(),
     },
     receivers: collectReceiverList(),
   };
@@ -3109,7 +3260,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       weatherOwmKey = payload.web.weather_owm_key || "";
       updateWeatherLayer();
       aircraftTTL = payload.aircraft_ttl;
-      alertConfig = payload.alerts;
+      alertConfig = { ...payload.alerts, discord_webhook_set: !!(payload.alerts.discord_webhook || "").trim() };
       showToast("Settings saved", "success");
     } else {
       gainSaving = false;
@@ -3741,8 +3892,74 @@ let alertConfig = {
   enabled: {{ 'true' if config.alerts.enabled else 'false' }},
   auto_select: {{ 'true' if config.alerts.auto_select else 'false' }},
   emergency_squawks: {{ 'true' if config.alerts.emergency_squawks else 'false' }},
+  military: {{ 'true' if config.alerts.military else 'false' }},
+  helicopters: {{ 'true' if config.alerts.helicopters else 'false' }},
+  squawk_change: {{ 'true' if config.alerts.squawk_change else 'false' }},
+  discord_webhook_set: {{ 'true' if config.alerts.discord_webhook else 'false' }},
   rules: {{ config.alerts.rules | tojson }},
+  watchlist: {{ config.alerts.watchlist | tojson }},
 };
+const _prevSquawks = new Map();  // icao -> last seen squawk (for change detection)
+
+function isOnWatchlist(icao) {
+  if (!icao) return false;
+  const hex = icao.toUpperCase();
+  return (alertConfig.watchlist || []).some(w => w && w.icao && w.icao.toUpperCase() === hex);
+}
+
+function toggleWatchlist(icao) {
+  if (!icao) return;
+  const hex = icao.toUpperCase();
+  const list = (alertConfig.watchlist || []).slice();
+  const idx = list.findIndex(w => w && w.icao && w.icao.toUpperCase() === hex);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    const ac = aircraft[icao];
+    list.push({ icao: hex, label: (ac && ac.callsign) ? ac.callsign.trim() : "" });
+  }
+  // Optimistic local update so the badge flips immediately
+  alertConfig.watchlist = list;
+  if (selectedIcao === icao && aircraft[icao]) renderDetail(aircraft[icao]);
+  // Persist via partial config update
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alerts: { watchlist: list } }),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.ok) showToast("Watchlist save failed: " + (d.error || ""), "danger");
+  })
+  .catch(err => showToast("Watchlist save failed: " + err, "danger"));
+}
+
+// Military ICAO ranges (24-bit hex). Sourced from ITU/ICAO assignments and
+// long-standing community lists (mictronics, planeplotter). Coverage is best-
+// effort, not exhaustive — designed to catch the common cases.
+const MIL_ICAO_RANGES = [
+  [0xADF7C8, 0xAFFFFF], // US military (DoD)
+  [0x43C000, 0x43CFFF], // UK military
+  [0x3F8000, 0x3FFFFF], // German Luftwaffe
+  [0x3EA000, 0x3EBFFF], // German military (older)
+  [0x33FF00, 0x33FFFF], // Italian military
+  [0x3B7000, 0x3B7FFF], // French military
+  [0x7CF800, 0x7CFFFF], // Australian military (RAAF)
+  [0xC87F00, 0xC87FFF], // Canadian military (RCAF)
+  [0x710000, 0x71FFFF], // South Korean military
+  // Note: India (0x800000–0x83FFFF) and Russia (0x140000–0x14FFFF) are the
+  // entire national civilian + military allocations, not military-only, so
+  // they are intentionally omitted to avoid flagging every civilian flight.
+];
+function isMilitaryIcao(icao) {
+  if (!icao) return false;
+  const hex = parseInt(icao, 16);
+  if (Number.isNaN(hex)) return false;
+  for (const [lo, hi] of MIL_ICAO_RANGES) {
+    if (hex >= lo && hex <= hi) return true;
+  }
+  return false;
+}
 const alertCooldown = new Map(); // key: "icao:ruleIdx" -> timestamp
 const alertedAircraft = new Set(); // icaos with active alerts
 const ALERT_COOLDOWN_MS = 60000;
@@ -3760,6 +3977,56 @@ function checkAlerts(ac) {
       const labels = {"7500":"Hijack","7600":"Radio Failure","7700":"Emergency"};
       fireAlert(ac, `Emergency: ${labels[ac.squawk] || ac.squawk}`);
       matched = true;
+    }
+  }
+
+  // Military aircraft (by ICAO range)
+  if (alertConfig.military && isMilitaryIcao(ac.icao)) {
+    const key = ac.icao + ":mil";
+    if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
+      alertCooldown.set(key, now);
+      fireAlert(ac, "Military aircraft");
+      matched = true;
+    }
+  }
+
+  // Helicopters / rotorcraft (by ADS-B emitter category OR callsign heuristic)
+  if (alertConfig.helicopters && ((ac.category || "").toUpperCase() === "A7" || looksLikeHeli(ac))) {
+    const key = ac.icao + ":heli";
+    if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
+      alertCooldown.set(key, now);
+      fireAlert(ac, "Helicopter / rotorcraft");
+      matched = true;
+    }
+  }
+
+  // Squawk change — fires once per change. No cooldown (changes are rare).
+  if (alertConfig.squawk_change && ac.squawk) {
+    const prev = _prevSquawks.get(ac.icao);
+    if (prev && prev !== ac.squawk) {
+      // Don't double-alert if the new code is an emergency squawk (already handled above)
+      if (!["7500","7600","7700"].includes(ac.squawk)) {
+        fireAlert(ac, `Squawk changed ${prev} → ${ac.squawk}`);
+        matched = true;
+      }
+    }
+    _prevSquawks.set(ac.icao, ac.squawk);
+  }
+
+  // Watchlist — alert on any aircraft whose ICAO is on the user's list
+  if (alertConfig.watchlist && alertConfig.watchlist.length) {
+    const acHex = (ac.icao || "").toUpperCase();
+    for (const w of alertConfig.watchlist) {
+      if (!w || !w.icao) continue;
+      if (acHex === w.icao.toUpperCase()) {
+        const key = ac.icao + ":watch";
+        if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
+          alertCooldown.set(key, now);
+          fireAlert(ac, "Watchlist: " + (w.label || w.icao));
+          matched = true;
+        }
+        break;
+      }
     }
   }
 
@@ -3785,12 +4052,7 @@ function checkAlerts(ac) {
         hit = ac.squawk === rule.value;
         break;
       case "military":
-        // Common US military ICAO ranges
-        if (ac.icao) {
-          const hex = parseInt(ac.icao, 16);
-          hit = (hex >= 0xADF7C0 && hex <= 0xAFFFFF) || // US military
-                (hex >= 0x43C000 && hex <= 0x43CFFF);    // UK military
-        }
+        hit = isMilitaryIcao(ac.icao);
         break;
       case "proximity":
         if (ac.lat != null && sensorLat != null && rule.value) {
@@ -3823,7 +4085,35 @@ function fireAlert(ac, label) {
   ].filter(Boolean).join(" | ");
 
   showToast(`Alert: ${title}${body ? " — " + body : ""}`, "danger");
+  sendDiscordAlert(ac, label, title, body);
+}
 
+function sendDiscordAlert(ac, label, title, body) {
+  if (!alertConfig.discord_webhook_set) return;
+  let distance_str = null;
+  if (ac.lat != null && sensorLat != null) {
+    const dLat = (ac.lat - sensorLat) * 60;
+    const dLon = (ac.lon - sensorLon) * 60 * Math.cos(sensorLat * Math.PI / 180);
+    distance_str = Math.sqrt(dLat*dLat + dLon*dLon).toFixed(1) + " nm";
+  }
+  fetch("/api/alerts/discord", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      description: label,
+      aircraft: {
+        icao: ac.icao,
+        callsign: ac.callsign || null,
+        squawk: ac.squawk || null,
+        altitude_str: ac.altitude != null ? ac.altitude.toLocaleString() + " ft" : null,
+        speed_str: ac.ground_speed != null ? ac.ground_speed + " kts" : null,
+        distance_str,
+        lat: ac.lat ?? null,
+        lon: ac.lon ?? null,
+      },
+    }),
+  }).catch(() => {});
 }
 
 // Alert rule UI helpers
@@ -3866,6 +4156,63 @@ document.getElementById("btn-add-alert-rule").addEventListener("click", () => {
   const rules = collectAlertRules();
   rules.push({ name: "", type: "icao", value: "", enabled: true });
   renderAlertRules(rules);
+});
+
+// Watchlist UI helpers
+function renderWatchlist(items) {
+  const list = document.getElementById("watchlist-rows");
+  list.innerHTML = (items || []).map((w, i) => `
+    <div class="alert-rule-row" data-idx="${i}">
+      <input type="text" class="form-control form-control-sm" style="width:110px;text-transform:uppercase;"
+             placeholder="ICAO" maxlength="6" value="${(w.icao || "").toUpperCase()}" data-field="icao"/>
+      <input type="text" class="form-control form-control-sm" style="flex:1;" placeholder="Label (optional)"
+             value="${w.label || ""}" data-field="label"/>
+      <button class="btn btn-xs btn-outline-danger" onclick="this.closest('.alert-rule-row').remove()" style="font-size:0.7rem;">
+        <i class="bi bi-x"></i>
+      </button>
+    </div>
+  `).join("");
+}
+
+function collectWatchlist() {
+  const rows = document.querySelectorAll("#watchlist-rows .alert-rule-row");
+  return Array.from(rows).map(row => ({
+    icao: row.querySelector('[data-field="icao"]').value.trim().toUpperCase(),
+    label: row.querySelector('[data-field="label"]').value.trim(),
+  })).filter(w => /^[0-9A-F]{6}$/.test(w.icao));
+}
+
+document.getElementById("btn-add-watchlist").addEventListener("click", () => {
+  const items = collectWatchlist();
+  items.push({ icao: "", label: "" });
+  renderWatchlist(items);
+});
+
+document.getElementById("btn-test-discord").addEventListener("click", (e) => {
+  e.preventDefault();
+  const url = document.getElementById("cfg-alerts-discord").value.trim();
+  if (!url) { showToast("Enter a webhook URL first", "warning"); return; }
+  // Save the in-input URL first so the server can use it
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ alerts: { discord_webhook: url } }),
+  })
+  .then(() => fetch("/api/alerts/discord", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "Test alert from 1090toTAK",
+      description: "If you see this in Discord, the webhook is working.",
+      aircraft: { icao: "TEST00", callsign: "TEST" },
+    }),
+  }))
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) { showToast("Discord test sent", "success"); alertConfig.discord_webhook_set = true; }
+    else showToast("Discord error: " + (d.error || "unknown"), "danger");
+  })
+  .catch(err => showToast("Discord test failed: " + err, "danger"));
 });
 
 // ============================================================
@@ -4272,6 +4619,7 @@ function restartApp() {
   let histMarkers  = {};    // ICAO → L.marker
   let histTrails   = {};    // ICAO → L.polyline
   let histCurMode  = "heatmap"; // "playback" | "heatmap"
+  let histSearch   = "";    // filter by ICAO or callsign substring
 
   const TRAIL_SEC  = 300;   // how many seconds of history to show per aircraft
   const STALE_SEC  = 120;   // hide aircraft seen more than this many seconds ago
@@ -4307,7 +4655,17 @@ function restartApp() {
   // ── Enter / exit ─────────────────────────────────────────
   function enterHistory() {
     histActive = true;
+    // Reset search
+    histSearch = "";
+    const sEl = document.getElementById("hist-search");
+    const sClr = document.getElementById("hist-search-clear");
+    if (sEl) sEl.value = "";
+    if (sClr) sClr.style.display = "none";
+    const sCnt = document.getElementById("hist-search-count");
+    if (sCnt) sCnt.textContent = "";
     document.body.classList.add("history-active");
+    // Close any open popups (aircraft, sensor, etc.)
+    map.closePopup();
     // Hide weather overlay while in history mode
     if (weatherEnabled) updateWeatherLayer();
     document.getElementById("btn-history-mode").classList.add("active","btn-info");
@@ -4387,9 +4745,36 @@ function restartApp() {
   function loadHeatmap() {
     clearHeat();
     clearPlaybackLayer();
-    setStatus("Loading heatmap (last 24h)…");
     const heatEnd = Math.floor(Date.now() / 1000);
     const heatStart = heatEnd - 86400;
+    // When a search filter is active, build the heatmap client-side from the
+    // per-aircraft range data so we can restrict it to matching callsigns/ICAOs.
+    if (histSearch) {
+      setStatus(`Loading heatmap for "${histSearch}"…`);
+      fetch(`/api/history/range?start=${heatStart}&end=${heatEnd}&step=30`)
+        .then(r => r.json())
+        .then(resp => {
+          histData = resp.aircraft || {};
+          const data = histDataFiltered();
+          const pts = [];
+          for (const pts_list of Object.values(data)) {
+            for (const p of pts_list) if (p.lat != null && p.lon != null) pts.push([p.lat, p.lon, 1]);
+          }
+          if (!pts.length) { setStatus(`No matches for "${histSearch}"`, false); updateBadge("0 points"); return; }
+          heatLayer = L.heatLayer(pts, {
+            radius: 18, blur: 14, maxZoom: 10, minOpacity: 0.4,
+            gradient: {0.2:"#00f", 0.5:"#0f0", 0.75:"#ff0", 1:"#f00"},
+          }).addTo(map);
+          const lats = pts.map(p => p[0]); const lons = pts.map(p => p[1]);
+          map.fitBounds(L.latLngBounds([Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]).pad(0.15));
+          setStatus(`Heatmap: ${Object.keys(data).length} aircraft, ${pts.length.toLocaleString()} points`);
+          updateBadge(`${pts.length.toLocaleString()} points`);
+          updateSearchCount();
+        })
+        .catch(e => setStatus(`Heatmap error: ${e}`, false));
+      return;
+    }
+    setStatus("Loading heatmap (last 24h)…");
     fetch(`/api/heatmap?start=${heatStart}&end=${heatEnd}`)
       .then(r => r.json())
       .then(pts => {
@@ -4435,6 +4820,7 @@ function restartApp() {
         histCur = histStart;
         updateSlider();
         renderPlaybackAt(histCur);
+        updateSearchCount();
       })
       .catch(e => setStatus(`Load error: ${e}`, false));
   }
@@ -4482,9 +4868,21 @@ function restartApp() {
     return `<div class="ac-popup">${rows.join("")}</div>`;
   }
 
+  function histDataFiltered() {
+    if (!histSearch) return histData;
+    const q = histSearch.toLowerCase();
+    const out = {};
+    for (const [icao, pts] of Object.entries(histData)) {
+      if (icao.toLowerCase().includes(q)) { out[icao] = pts; continue; }
+      if (pts.some(p => p.callsign && p.callsign.toLowerCase().includes(q))) out[icao] = pts;
+    }
+    return out;
+  }
+
   function renderPlaybackAt(ts) {
     const visible = new Set();
-    for (const [icao, pts] of Object.entries(histData)) {
+    const data = histDataFiltered();
+    for (const [icao, pts] of Object.entries(data)) {
       const pos = getAircraftAtTime(pts, ts);
       if (!pos) continue;
       visible.add(icao);
@@ -4631,7 +5029,47 @@ function restartApp() {
       histCur = histStart + pct * (histEnd - histStart);
       renderPlaybackAt(histCur);
     });
+
+    // Search input — filter by ICAO or callsign
+    const searchEl = document.getElementById("hist-search");
+    const searchClearEl = document.getElementById("hist-search-clear");
+    let searchDebounce = null;
+    searchEl.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        histSearch = (searchEl.value || "").trim();
+        searchClearEl.style.display = histSearch ? "" : "none";
+        applySearch();
+      }, 150);
+    });
+    searchClearEl.addEventListener("click", () => {
+      searchEl.value = "";
+      histSearch = "";
+      searchClearEl.style.display = "none";
+      applySearch();
+      searchEl.focus();
+    });
   });
+
+  function updateSearchCount() {
+    const el = document.getElementById("hist-search-count");
+    if (!el) return;
+    if (!histSearch) { el.textContent = ""; return; }
+    const matches = Object.keys(histDataFiltered()).length;
+    el.textContent = `${matches} match${matches === 1 ? "" : "es"}`;
+  }
+
+  function applySearch() {
+    if (!histActive) return;
+    if (histCurMode === "heatmap") {
+      loadHeatmap();
+    } else {
+      // Playback: if we have data, just re-render with filter; else load it
+      if (!Object.keys(histData).length) { loadPlayback(); return; }
+      renderPlaybackAt(histCur);
+      updateSearchCount();
+    }
+  }
 })();
 </script>
 </body>

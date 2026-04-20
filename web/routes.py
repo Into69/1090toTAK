@@ -443,6 +443,53 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
         log.info("Tile cache cleared: %d tiles, %d bytes", stats["tiles"], stats["bytes"])
         return {"ok": True, **stats}
 
+    @router.post("/api/alerts/discord")
+    async def alerts_discord(request: Request):
+        webhook = (config.alerts.discord_webhook or "").strip()
+        if not webhook:
+            return JSONResponse({"ok": False, "error": "no webhook configured"}, status_code=400)
+        if not (webhook.startswith("https://discord.com/api/webhooks/")
+                or webhook.startswith("https://discordapp.com/api/webhooks/")
+                or webhook.startswith("https://canary.discord.com/api/webhooks/")
+                or webhook.startswith("https://ptb.discord.com/api/webhooks/")):
+            return JSONResponse({"ok": False, "error": "invalid Discord webhook URL"}, status_code=400)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        title = str(body.get("title") or "ADS-B Alert")[:256]
+        desc = str(body.get("description") or "")[:2000]
+        ac = body.get("aircraft") or {}
+        fields = []
+        for label, key in (("ICAO", "icao"), ("Callsign", "callsign"),
+                           ("Squawk", "squawk"), ("Altitude", "altitude_str"),
+                           ("Speed", "speed_str"), ("Distance", "distance_str")):
+            v = ac.get(key)
+            if v not in (None, ""):
+                fields.append({"name": label, "value": str(v)[:200], "inline": True})
+        embed = {"title": title, "description": desc, "color": 0xE63946, "fields": fields}
+        if ac.get("lat") is not None and ac.get("lon") is not None:
+            embed["url"] = f"https://www.google.com/maps?q={ac['lat']},{ac['lon']}"
+        payload = {"username": "1090toTAK", "embeds": [embed]}
+        import json as _json
+        import urllib.request as _ur
+        import urllib.error as _ue
+        req = _ur.Request(
+            webhook, data=_json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "1090toTAK/1.0"},
+            method="POST",
+        )
+        try:
+            with _ur.urlopen(req, timeout=5) as resp:
+                if 200 <= resp.status < 300:
+                    return {"ok": True}
+                return JSONResponse({"ok": False, "error": f"discord returned {resp.status}"}, status_code=502)
+        except _ue.HTTPError as e:
+            return JSONResponse({"ok": False, "error": f"discord {e.code}"}, status_code=502)
+        except Exception as e:
+            log.warning("Discord webhook send failed: %s", e)
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
+
     @router.post("/api/tak/send/{icao}")
     def tak_send_single(icao: str):
         if not tak_sender:
