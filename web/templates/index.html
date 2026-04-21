@@ -4755,6 +4755,7 @@ function restartApp() {
         .then(r => r.json())
         .then(resp => {
           histData = resp.aircraft || {};
+          rebuildHistMeta();
           const data = histDataFiltered();
           const pts = [];
           for (const pts_list of Object.values(data)) {
@@ -4803,6 +4804,26 @@ function restartApp() {
     histMarkers = {}; histTrails = {};
   }
 
+  // Cache: ICAO → { callsign, category } resolved across the loaded range.
+  // Aircraft don't broadcast callsign/category every position update, so early
+  // rows often have nulls — we project the most recent known values onto every
+  // point so the icon (heli, jet, etc.) stays correct throughout the timeline.
+  let histMeta = {};
+
+  function rebuildHistMeta() {
+    histMeta = {};
+    for (const [icao, pts] of Object.entries(histData)) {
+      let callsign = null, category = null;
+      for (let i = pts.length - 1; i >= 0; i--) {
+        const p = pts[i];
+        if (callsign == null && p.callsign) callsign = p.callsign;
+        if (category == null && p.category) category = p.category;
+        if (callsign && category) break;
+      }
+      histMeta[icao] = { callsign, category };
+    }
+  }
+
   function loadPlayback() {
     clearHeat();
     clearPlaybackLayer();
@@ -4812,6 +4833,7 @@ function restartApp() {
       .then(r => r.json())
       .then(resp => {
         histData  = resp.aircraft || {};
+        rebuildHistMeta();
         const count = Object.keys(histData).length;
         if (!count) { setStatus("No data in range", false); return; }
         setStatus(`${count} aircraft, ${resp.count.toLocaleString()} points — drag slider or press ▶`);
@@ -4847,10 +4869,14 @@ function restartApp() {
     return pts.filter(p => p.ts <= ts).map(p => [p.lat, p.lon]);
   }
 
-  function histPopupHtml(icao, pos) {
+  function histPopupHtml(icao, pos, meta) {
     const rows = [];
-    rows.push(`<div style="font-weight:700;font-size:0.9rem;margin-bottom:4px;">${pos.callsign || icao}</div>`);
-    if (pos.callsign) rows.push(`<div><span class="ac-pop-lbl">ICAO</span> ${icao}</div>`);
+    const callsign = pos.callsign || (meta && meta.callsign) || null;
+    const category = pos.category || (meta && meta.category) || null;
+    rows.push(`<div style="font-weight:700;font-size:0.9rem;margin-bottom:4px;">${callsign || icao}</div>`);
+    if (callsign) rows.push(`<div><span class="ac-pop-lbl">ICAO</span> ${icao}</div>`);
+    if (category && CATEGORY_NAMES[category])
+      rows.push(`<div><span class="ac-pop-lbl">Type</span> ${CATEGORY_NAMES[category]}</div>`);
     if (pos.altitude != null)
       rows.push(`<div><span class="ac-pop-lbl">Altitude</span> ${pos.altitude.toLocaleString()} ft</div>`);
     if (pos.ground_speed != null)
@@ -4874,6 +4900,8 @@ function restartApp() {
     const out = {};
     for (const [icao, pts] of Object.entries(histData)) {
       if (icao.toLowerCase().includes(q)) { out[icao] = pts; continue; }
+      const meta = histMeta[icao] || {};
+      if (meta.callsign && meta.callsign.toLowerCase().includes(q)) { out[icao] = pts; continue; }
       if (pts.some(p => p.callsign && p.callsign.toLowerCase().includes(q))) out[icao] = pts;
     }
     return out;
@@ -4887,8 +4915,13 @@ function restartApp() {
       if (!pos) continue;
       visible.add(icao);
       const ll = [pos.lat, pos.lon];
-      // Build a pseudo-aircraft object for makeIcon()
+      // Build a pseudo-aircraft object for makeIcon(); fill in the most-recent
+      // known callsign/category so heli/jet/etc. icons render even on positions
+      // that pre-date the identification frame.
+      const meta = histMeta[icao] || {};
       const ac = { icao, ...pos };
+      if (!ac.callsign && meta.callsign) ac.callsign = meta.callsign;
+      if (!ac.category && meta.category) ac.category = meta.category;
       const icon = makeIcon(ac);
       // Marker
       if (!histMarkers[icao]) {
@@ -4900,8 +4933,8 @@ function restartApp() {
         histMarkers[icao].setLatLng(ll);
         histMarkers[icao].setIcon(icon);
       }
-      // Update popup content
-      histMarkers[icao].setPopupContent(histPopupHtml(icao, pos));
+      // Update popup content (with projected metadata)
+      histMarkers[icao].setPopupContent(histPopupHtml(icao, pos, meta));
       // Trail
       const trail = getTrailPoints(pts, ts);
       if (trail.length >= 2) {
@@ -5061,13 +5094,64 @@ function restartApp() {
 
   function applySearch() {
     if (!histActive) return;
-    if (histCurMode === "heatmap") {
-      loadHeatmap();
-    } else {
-      // Playback: if we have data, just re-render with filter; else load it
-      if (!Object.keys(histData).length) { loadPlayback(); return; }
-      renderPlaybackAt(histCur);
+    // Empty search — refresh current mode
+    if (!histSearch) {
+      if (histCurMode === "heatmap") loadHeatmap();
+      else {
+        if (!Object.keys(histData).length) { loadPlayback(); return; }
+        renderPlaybackAt(histCur);
+      }
       updateSearchCount();
+      return;
+    }
+    // Active search — move to playback, jump to first matching ts
+    const jumpToFirstHit = () => {
+      const filtered = histDataFiltered();
+      const matches = Object.keys(filtered);
+      updateSearchCount();
+      if (!matches.length) {
+        setStatus(`No matches for "${histSearch}"`, false);
+        clearPlaybackLayer();
+        updateBadge("0 aircraft");
+        return;
+      }
+      // Switch to playback mode if currently in heatmap
+      if (histCurMode === "heatmap") {
+        histCurMode = "playback";
+        document.getElementById("hist-mode-playback").classList.add("active");
+        document.getElementById("hist-mode-heatmap").classList.remove("active");
+        setPlayerEnabled(true);
+        clearHeat();
+      }
+      // Earliest timestamp across all matching aircraft tracks
+      let firstTs = Infinity;
+      for (const pts of Object.values(filtered)) {
+        if (pts.length && pts[0].ts < firstTs) firstTs = pts[0].ts;
+      }
+      if (isFinite(firstTs)) {
+        histCur = firstTs;
+        updateSlider();
+        renderPlaybackAt(histCur);
+        setStatus(`"${histSearch}": ${matches.length} aircraft — first seen ${fmtTs(firstTs)}`);
+      }
+    };
+    if (!Object.keys(histData).length) {
+      setStatus("Loading…");
+      const now = Math.floor(Date.now() / 1000);
+      const startTs = histStart || (now - 86400);
+      const endTs   = histEnd   || now;
+      fetch(`/api/history/range?start=${startTs}&end=${endTs}&step=30`)
+        .then(r => r.json())
+        .then(resp => {
+          histData  = resp.aircraft || {};
+          histStart = resp.start || startTs;
+          histEnd   = resp.end   || endTs;
+          rebuildHistMeta();
+          jumpToFirstHit();
+        })
+        .catch(e => setStatus(`Load error: ${e}`, false));
+    } else {
+      jumpToFirstHit();
     }
   }
 })();
