@@ -511,6 +511,26 @@
                style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:240px;"
                autocomplete="off"/>
         <button id="hist-search-clear" class="btn btn-xs btn-outline-secondary py-0 px-2" title="Clear search" style="display:none;">×</button>
+        <select id="hist-type-filter" class="form-select form-select-sm py-0"
+                style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:170px;"
+                title="Filter by aircraft type">
+          <option value="">All types</option>
+          <option value="heli">Helicopter / rotorcraft</option>
+          <option value="A1">Light fixed-wing</option>
+          <option value="A2">Small fixed-wing</option>
+          <option value="A3">Large fixed-wing</option>
+          <option value="A4">High vortex</option>
+          <option value="A5">Heavy</option>
+          <option value="A6">High performance</option>
+          <option value="B1">Glider</option>
+          <option value="B2">Lighter-than-air</option>
+          <option value="B4">Ultralight</option>
+          <option value="B6">UAV / drone</option>
+          <option value="B7">Space</option>
+          <option value="C1">Emergency vehicle</option>
+          <option value="C2">Service vehicle</option>
+          <option value="unknown">Unknown / no category</option>
+        </select>
         <span id="hist-search-count" style="font-size:0.72rem;color:#8899aa;"></span>
       </div>
     </div>
@@ -4620,6 +4640,7 @@ function restartApp() {
   let histTrails   = {};    // ICAO → L.polyline
   let histCurMode  = "heatmap"; // "playback" | "heatmap"
   let histSearch   = "";    // filter by ICAO or callsign substring
+  let histTypeFilter = "";  // "" | "heli" | "A1".."C2" | "unknown"
 
   const TRAIL_SEC  = 300;   // how many seconds of history to show per aircraft
   const STALE_SEC  = 120;   // hide aircraft seen more than this many seconds ago
@@ -4655,12 +4676,15 @@ function restartApp() {
   // ── Enter / exit ─────────────────────────────────────────
   function enterHistory() {
     histActive = true;
-    // Reset search
+    // Reset search + type filter
     histSearch = "";
+    histTypeFilter = "";
     const sEl = document.getElementById("hist-search");
     const sClr = document.getElementById("hist-search-clear");
+    const sType = document.getElementById("hist-type-filter");
     if (sEl) sEl.value = "";
     if (sClr) sClr.style.display = "none";
+    if (sType) sType.value = "";
     const sCnt = document.getElementById("hist-search-count");
     if (sCnt) sCnt.textContent = "";
     document.body.classList.add("history-active");
@@ -4894,11 +4918,26 @@ function restartApp() {
     return `<div class="ac-popup">${rows.join("")}</div>`;
   }
 
+  function matchesType(icao) {
+    if (!histTypeFilter) return true;
+    const meta = histMeta[icao] || {};
+    const cat = (meta.category || "").toUpperCase();
+    if (histTypeFilter === "heli") {
+      // Match A7 OR callsign-based heuristic (rotorcraft often skip ID frames)
+      if (cat === "A7") return true;
+      return looksLikeHeli({ callsign: meta.callsign });
+    }
+    if (histTypeFilter === "unknown") return !cat;
+    return cat === histTypeFilter;
+  }
+
   function histDataFiltered() {
-    if (!histSearch) return histData;
+    if (!histSearch && !histTypeFilter) return histData;
     const q = histSearch.toLowerCase();
     const out = {};
     for (const [icao, pts] of Object.entries(histData)) {
+      if (!matchesType(icao)) continue;
+      if (!histSearch) { out[icao] = pts; continue; }
       if (icao.toLowerCase().includes(q)) { out[icao] = pts; continue; }
       const meta = histMeta[icao] || {};
       if (meta.callsign && meta.callsign.toLowerCase().includes(q)) { out[icao] = pts; continue; }
@@ -5082,20 +5121,28 @@ function restartApp() {
       applySearch();
       searchEl.focus();
     });
+
+    // Aircraft-type dropdown — filter by category
+    const typeEl = document.getElementById("hist-type-filter");
+    typeEl.addEventListener("change", () => {
+      histTypeFilter = typeEl.value || "";
+      applySearch();
+    });
   });
 
   function updateSearchCount() {
     const el = document.getElementById("hist-search-count");
     if (!el) return;
-    if (!histSearch) { el.textContent = ""; return; }
+    if (!histSearch && !histTypeFilter) { el.textContent = ""; return; }
     const matches = Object.keys(histDataFiltered()).length;
     el.textContent = `${matches} match${matches === 1 ? "" : "es"}`;
   }
 
   function applySearch() {
     if (!histActive) return;
-    // Empty search — refresh current mode
-    if (!histSearch) {
+    const filterActive = histSearch || histTypeFilter;
+    // No filter at all — refresh current mode
+    if (!filterActive) {
       if (histCurMode === "heatmap") loadHeatmap();
       else {
         if (!Object.keys(histData).length) { loadPlayback(); return; }
@@ -5104,13 +5151,16 @@ function restartApp() {
       updateSearchCount();
       return;
     }
-    // Active search — move to playback, jump to first matching ts
+    // Active filter — move to playback, jump to first matching ts
+    const queryLabel = histSearch
+      ? `"${histSearch}"${histTypeFilter ? " + " + histTypeFilter : ""}`
+      : `type=${histTypeFilter}`;
     const jumpToFirstHit = () => {
       const filtered = histDataFiltered();
       const matches = Object.keys(filtered);
       updateSearchCount();
       if (!matches.length) {
-        setStatus(`No matches for "${histSearch}"`, false);
+        setStatus(`No matches for ${queryLabel}`, false);
         clearPlaybackLayer();
         updateBadge("0 aircraft");
         return;
