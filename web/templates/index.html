@@ -312,6 +312,18 @@
     }
     body.history-active #history-panel { display: block; }
     body.history-active #sidebar       { display: none !important; }
+    /* When an aircraft is selected during history playback, show only the
+       detail panel — not the live aircraft table — in a slim sidebar. */
+    body.history-active.history-detail #sidebar {
+      display: flex !important;
+      flex-direction: column;
+    }
+    body.history-active.history-detail #sidebar-header,
+    body.history-active.history-detail #sidebar > div:nth-of-type(2),
+    body.history-active.history-detail #aircraft-table-wrapper { display: none !important; }
+    body.history-active.history-detail #detail-panel {
+      flex: 1 1 auto; overflow-y: auto;
+    }
     /* Shift the Leaflet zoom controls and the zoom indicator below the
        history panel so they remain visible/clickable. The offset is set
        dynamically from the measured panel height — see enterHistory(). */
@@ -551,6 +563,10 @@
         <input type="number" id="hist-alt-value" class="form-control form-control-sm py-0"
                placeholder="ft" min="0" step="500"
                style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:80px;display:none;"/>
+        <button id="hist-match-prev" class="btn btn-xs btn-outline-secondary py-0 px-2"
+                title="Previous match" style="display:none;font-size:0.72rem;">‹</button>
+        <button id="hist-match-next" class="btn btn-xs btn-outline-secondary py-0 px-2"
+                title="Next match" style="display:none;font-size:0.72rem;">›</button>
         <span id="hist-search-count" style="font-size:0.72rem;color:#8899aa;"></span>
       </div>
     </div>
@@ -1567,6 +1583,13 @@ map.on("click", () => {
     clearTrack();
     renderTable();
   }
+  // Deselect any history-mode selection on background-map click. The
+  // marker's own click handler stops propagation, so this only fires
+  // when the click misses every marker.
+  if (document.body.classList.contains("history-active") &&
+      typeof window.histDeselectGlobal === "function") {
+    window.histDeselectGlobal();
+  }
 });
 
 // Follow mode: when an aircraft is selected, the map auto-fits to track + position.
@@ -2172,13 +2195,16 @@ function renderDetail(ac) {
             title="${watched ? "Remove from watchlist" : "Add to watchlist"}">
       <i class="bi bi-${watched ? "star-fill" : "star"}"></i> Watch
     </button>`;
-  panel.innerHTML = `
-    <h6>${ac.callsign ? fmtCallsign(ac.callsign) : ac.icao}${emerg}
+  const inHistory = document.body.classList.contains("history-active");
+  const takBtn = inHistory ? "" : `
       <button class="btn btn-xs btn-outline-warning btn-sm float-end"
               style="font-size:0.65rem;padding:1px 6px;"
               onclick="sendToTak('${ac.icao}')">
         <i class="bi bi-send"></i> TAK
-      </button>
+      </button>`;
+  panel.innerHTML = `
+    <h6>${ac.callsign ? fmtCallsign(ac.callsign) : ac.icao}${emerg}
+      ${takBtn}
       ${watchBtn}
     </h6>
     <div id="ac-photo" style="text-align:center;min-height:0;"></div>
@@ -4818,6 +4844,8 @@ function restartApp() {
   let histTypeFilter = "";  // "" | "heli" | "A1".."C2" | "unknown"
   let histAltOp    = "";    // "" | "above" | "below"
   let histAltValue = 0;     // altitude threshold in feet
+  let histSelectedIcao = null;  // ICAO of aircraft selected during playback
+  let histMatchIdx = -1;        // current index into the filtered match list
 
   const TRAIL_SEC  = 300;   // how many seconds of history to show per aircraft
   const STALE_SEC  = 120;   // hide aircraft seen more than this many seconds ago
@@ -4853,11 +4881,14 @@ function restartApp() {
   // ── Enter / exit ─────────────────────────────────────────
   function enterHistory() {
     histActive = true;
-    // Reset search + type + altitude filters
+    // Reset search + type + altitude filters and any prior selection
     histSearch = "";
     histTypeFilter = "";
     histAltOp = "";
     histAltValue = 0;
+    histMatchIdx = -1;
+    histSelectedIcao = null;
+    document.body.classList.remove("history-detail");
     const sEl = document.getElementById("hist-search");
     const sClr = document.getElementById("hist-search-clear");
     const sType = document.getElementById("hist-type-filter");
@@ -4933,7 +4964,9 @@ function restartApp() {
     clearPlaybackLayer();
     histActive = false;
     histData   = {};
-    document.body.classList.remove("history-active");
+    histSelectedIcao = null;
+    renderDetail(null);
+    document.body.classList.remove("history-active", "history-detail");
     // Restore weather overlay if it was enabled
     if (weatherEnabled) updateWeatherLayer();
     const sp = document.getElementById("spectrum-panel");
@@ -5024,6 +5057,99 @@ function restartApp() {
   function clearPlaybackLayer() {
     if (histLayerGrp) histLayerGrp.clearLayers();
     histMarkers = {}; histTrails = {};
+  }
+
+  // Build a live-aircraft-shaped object from the historical track for the
+  // detail panel. Projected callsign/category fill in gaps from non-ID frames.
+  function buildHistAc(icao, pos, meta) {
+    const ac = { icao, ...pos };
+    if (!ac.callsign && meta && meta.callsign) ac.callsign = meta.callsign;
+    if (!ac.category && meta && meta.category) ac.category = meta.category;
+    if (pos && pos.ts) ac.age = Math.max(0, Math.round((histCur - pos.ts)));
+    return ac;
+  }
+
+  function histRefreshDetail() {
+    if (!histSelectedIcao) return;
+    const pts = histData[histSelectedIcao];
+    if (!pts || !pts.length) { histDeselect(); return; }
+    const pos = getAircraftAtTime(pts, histCur);
+    if (!pos) {
+      // Aircraft has no position at this frame — keep the panel but blank
+      // the position-derived rows by passing a sparse object.
+      const meta = histMeta[histSelectedIcao] || {};
+      renderDetail(buildHistAc(histSelectedIcao, { ts: histCur }, meta));
+      return;
+    }
+    const meta = histMeta[histSelectedIcao] || {};
+    renderDetail(buildHistAc(histSelectedIcao, pos, meta));
+  }
+
+  function histSelect(icao) {
+    histSelectedIcao = icao;
+    document.body.classList.add("history-detail");
+    histRefreshDetail();
+  }
+
+  function histDeselect() {
+    histSelectedIcao = null;
+    document.body.classList.remove("history-detail");
+    renderDetail(null);
+  }
+
+  // Exposed so the global map-click handler can deselect the history pick.
+  window.histDeselectGlobal = histDeselect;
+
+  function histMatchOrder() {
+    // Stable order: by earliest position timestamp, then by ICAO. Gives
+    // predictable Prev/Next traversal across filter changes.
+    const filtered = histDataFiltered();
+    return Object.entries(filtered)
+      .map(([icao, pts]) => ({ icao, firstTs: pts[0]?.ts || Infinity }))
+      .sort((a, b) => a.firstTs - b.firstTs || a.icao.localeCompare(b.icao))
+      .map(e => e.icao);
+  }
+
+  function histGoToMatch(idx) {
+    const order = histMatchOrder();
+    if (!order.length) return;
+    histMatchIdx = ((idx % order.length) + order.length) % order.length;
+    const icao = order[histMatchIdx];
+    const pts = histData[icao];
+    if (!pts || !pts.length) return;
+    // Jump time to a frame where this aircraft has a position matching the
+    // active altitude filter (if any), else its first position.
+    let targetTs = pts[0].ts;
+    if (histAltOp && histAltValue > 0) {
+      const hit = pts.find(p => altMatches(p.altitude));
+      if (hit) targetTs = hit.ts;
+    }
+    histCur = Math.max(histStart, Math.min(histEnd, targetTs));
+    updateSlider();
+    histSelect(icao);
+    renderPlaybackAt(histCur);
+    // Recenter on the picked aircraft for fast visual feedback
+    const pos = getAircraftAtTime(pts, histCur);
+    if (pos) map.panTo([pos.lat, pos.lon]);
+    updateMatchNav();
+  }
+
+  function updateMatchNav() {
+    const prev = document.getElementById("hist-match-prev");
+    const next = document.getElementById("hist-match-next");
+    const cnt = document.getElementById("hist-search-count");
+    if (!prev || !next) return;
+    const filterActive = histSearch || histTypeFilter || (histAltOp && histAltValue > 0);
+    const order = filterActive ? histMatchOrder() : [];
+    const show = filterActive && order.length > 0;
+    prev.style.display = show ? "" : "none";
+    next.style.display = show ? "" : "none";
+    if (show && cnt) {
+      // Augment count with current position when we've stepped through matches
+      if (histMatchIdx >= 0 && histMatchIdx < order.length) {
+        cnt.textContent = `${histMatchIdx + 1} of ${order.length}`;
+      }
+    }
   }
 
   // Cache: ICAO → { callsign, category } resolved across the loaded range.
@@ -5183,6 +5309,7 @@ function restartApp() {
         histMarkers[icao].bindPopup("", { className: "ac-popup-wrap", maxWidth: 220, autoPan: false });
         histMarkers[icao].on("mouseover", function () { openPopupSmart(this); });
         histMarkers[icao].on("mouseout",  function () { this.closePopup(); });
+        histMarkers[icao].on("click", () => histSelect(icao));
       } else {
         histMarkers[icao].setLatLng(ll);
         histMarkers[icao].setIcon(icon);
@@ -5212,6 +5339,12 @@ function restartApp() {
     // Update label
     document.getElementById("hist-time-lbl").textContent = fmtTs(ts);
     updateBadge(`${visible.size} aircraft`);
+    // Refresh selected-aircraft detail panel for the current frame
+    if (histSelectedIcao) {
+      // If the selected aircraft was filtered out, drop the selection
+      if (!data[histSelectedIcao]) histDeselect();
+      else histRefreshDetail();
+    }
   }
 
   function updateSlider() {
@@ -5363,6 +5496,16 @@ function restartApp() {
       clearTimeout(altDebounce);
       altDebounce = setTimeout(applyAltFilter, 150);
     });
+
+    // Prev/Next match navigation
+    const prevBtn = document.getElementById("hist-match-prev");
+    const nextBtn = document.getElementById("hist-match-next");
+    if (prevBtn) prevBtn.addEventListener("click", () => {
+      histGoToMatch(histMatchIdx <= 0 ? -1 : histMatchIdx - 1);
+    });
+    if (nextBtn) nextBtn.addEventListener("click", () => {
+      histGoToMatch(histMatchIdx + 1);
+    });
   });
 
   function altLabel() {
@@ -5372,10 +5515,15 @@ function restartApp() {
 
   function updateSearchCount() {
     const el = document.getElementById("hist-search-count");
-    if (!el) return;
-    if (!histSearch && !histTypeFilter && !altLabel()) { el.textContent = ""; return; }
+    if (!el) { updateMatchNav(); return; }
+    if (!histSearch && !histTypeFilter && !altLabel()) {
+      el.textContent = "";
+      updateMatchNav();
+      return;
+    }
     const matches = Object.keys(histDataFiltered()).length;
     el.textContent = `${matches} match${matches === 1 ? "" : "es"}`;
+    updateMatchNav();
   }
 
   function applySearch() {
@@ -5383,6 +5531,7 @@ function restartApp() {
     const filterActive = histSearch || histTypeFilter || altLabel();
     // No filter at all — refresh current mode
     if (!filterActive) {
+      histMatchIdx = -1;
       if (histCurMode === "heatmap") loadHeatmap();
       else {
         if (!Object.keys(histData).length) { loadPlayback(); return; }
@@ -5426,6 +5575,10 @@ function restartApp() {
         renderPlaybackAt(histCur);
         setStatus(`${queryLabel}: ${matches.length} aircraft — first seen ${fmtTs(firstTs)}`);
       }
+      // Seed match index so Prev/Next start from the first hit
+      const order = histMatchOrder();
+      histMatchIdx = order.length ? 0 : -1;
+      updateMatchNav();
     };
     if (!Object.keys(histData).length) {
       setStatus("Loading…");
