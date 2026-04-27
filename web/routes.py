@@ -65,7 +65,7 @@ def _proc_system_stats() -> dict | None:
 _web_dir = Path(__file__).parent
 
 
-def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinja2Templates, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None):
+def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinja2Templates, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None, military_db=None):
 
     router = APIRouter()
 
@@ -267,6 +267,12 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
                 if config.location.mode != LOCATION_GPSD:
                     config.location.lat = 0.0
                     config.location.lon = 0.0
+            if military_db and "military_db" in data:
+                military_db.set_path(config.military_db.path)
+                if config.military_db.enabled:
+                    import os as _os
+                    if _os.path.exists(config.military_db.path):
+                        military_db.load()
             log.info("Config updated and saved")
             return {"ok": True, "config": config_to_dict(config)}
         except Exception as e:
@@ -581,6 +587,46 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             except Exception as e:
                 results.append({"path": path, "ok": False, "error": _fmt_error(e, url)})
         return {"ok": all(r["ok"] for r in results), "results": results}
+
+    # ------------------------------------------------------------------
+    # Military aircraft database — optional, drives authoritative
+    # per-tail military flagging instead of crude ICAO range guesses.
+    # ------------------------------------------------------------------
+
+    @router.get("/api/military_db/status")
+    def military_db_status():
+        if military_db is None:
+            return {"available": False, "enabled": False}
+        return {
+            "available": True,
+            "enabled": config.military_db.enabled,
+            "url": config.military_db.url,
+            **military_db.status(),
+        }
+
+    @router.get("/api/military_db/icaos")
+    def military_db_icaos():
+        if military_db is None or not config.military_db.enabled:
+            return {"icaos": []}
+        return {"icaos": military_db.icaos()}
+
+    @router.post("/api/military_db/download")
+    def military_db_download():
+        if military_db is None:
+            return JSONResponse({"ok": False, "error": "military DB not initialized"}, status_code=503)
+        url = config.military_db.url
+        if not url:
+            return JSONResponse({"ok": False, "error": "no URL configured"}, status_code=400)
+        result = military_db.download(url)
+        status = 200 if result.get("ok") else 502
+        return JSONResponse(result, status_code=status)
+
+    @router.post("/api/military_db/load")
+    def military_db_load():
+        if military_db is None:
+            return JSONResponse({"ok": False, "error": "military DB not initialized"}, status_code=503)
+        count = military_db.load()
+        return {"ok": True, "loaded": count}
 
     @router.post("/api/restart")
     def restart_app():

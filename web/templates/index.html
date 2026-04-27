@@ -515,6 +515,7 @@
                 style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:170px;"
                 title="Filter by aircraft type">
           <option value="">All types</option>
+          <option value="military">Military</option>
           <option value="heli">Helicopter / rotorcraft</option>
           <option value="A1">Light fixed-wing</option>
           <option value="A2">Small fixed-wing</option>
@@ -531,6 +532,16 @@
           <option value="C2">Service vehicle</option>
           <option value="unknown">Unknown / no category</option>
         </select>
+        <select id="hist-alt-op" class="form-select form-select-sm py-0"
+                style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:90px;"
+                title="Altitude filter">
+          <option value="">Any alt</option>
+          <option value="above">Above</option>
+          <option value="below">Below</option>
+        </select>
+        <input type="number" id="hist-alt-value" class="form-control form-control-sm py-0"
+               placeholder="ft" min="0" step="500"
+               style="background:#0d0f11;border-color:#2c2f33;color:#cdd0d5;font-size:0.72rem;max-width:80px;display:none;"/>
         <span id="hist-search-count" style="font-size:0.72rem;color:#8899aa;"></span>
       </div>
     </div>
@@ -1333,8 +1344,48 @@
                   <input class="form-check-input" type="checkbox" id="cfg-alerts-military"/>
                   <label class="form-check-label" for="cfg-alerts-military">
                     Military aircraft
-                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert on ICAO addresses in known US, UK, AU, CA, FR, DE, RU military ranges</span>
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Alert on ICAO addresses flagged as military (range list, or downloaded database when enabled below)</span>
                   </label>
+                </div>
+              </div>
+              <div class="col-12 border-top border-secondary pt-2 mt-1">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-mildb-enabled"/>
+                  <label class="form-check-label" for="cfg-mildb-enabled">
+                    Use military aircraft database
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Authoritative per-tail military flag from the tar1090-db database. When enabled, replaces the built-in ICAO range guesses.</span>
+                  </label>
+                </div>
+                <div class="row g-2 mt-1 ms-1" id="mildb-controls" style="font-size:0.78rem;">
+                  <div class="col-12">
+                    <label class="form-label mb-1" for="cfg-mildb-url" style="font-size:0.72rem;color:#8899aa;">Database URL</label>
+                    <input type="text" class="form-control form-control-sm" id="cfg-mildb-url"
+                           placeholder="https://raw.githubusercontent.com/Mictronics/readsb-protobuf/.../aircrafts.json"/>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label mb-1" for="cfg-mildb-path" style="font-size:0.72rem;color:#8899aa;">Local file path</label>
+                    <input type="text" class="form-control form-control-sm" id="cfg-mildb-path"
+                           placeholder="aircraft_db.json"/>
+                  </div>
+                  <div class="col-12">
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="cfg-mildb-autodownload"/>
+                      <label class="form-check-label" for="cfg-mildb-autodownload" style="font-size:0.78rem;">
+                        Auto-download on startup if missing
+                      </label>
+                    </div>
+                  </div>
+                  <div class="col-12">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btn-mildb-download">
+                      <i class="bi bi-cloud-download me-1"></i>Download / Update database
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="btn-mildb-reload">
+                      <i class="bi bi-arrow-clockwise me-1"></i>Reload from disk
+                    </button>
+                  </div>
+                  <div class="col-12">
+                    <div id="mildb-status" style="font-size:0.72rem;color:#8899aa;">Database status: unknown</div>
+                  </div>
                 </div>
               </div>
               <div class="col-12">
@@ -2961,6 +3012,13 @@ function loadSettingsForm(cfg) {
   renderWatchlist(cfg.alerts?.watchlist || []);
   renderAlertRules(cfg.alerts?.rules || []);
 
+  // Military DB
+  document.getElementById("cfg-mildb-enabled").checked = cfg.military_db?.enabled || false;
+  document.getElementById("cfg-mildb-url").value = cfg.military_db?.url || "";
+  document.getElementById("cfg-mildb-path").value = cfg.military_db?.path || "";
+  document.getElementById("cfg-mildb-autodownload").checked = cfg.military_db?.auto_download || false;
+  refreshMilitaryDbStatus();
+
   // Multi-receiver
   renderReceiverList(cfg.receivers || []);
 }
@@ -3248,6 +3306,12 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       rules: collectAlertRules(),
       watchlist: collectWatchlist(),
     },
+    military_db: {
+      enabled: document.getElementById("cfg-mildb-enabled").checked,
+      url: document.getElementById("cfg-mildb-url").value.trim(),
+      path: document.getElementById("cfg-mildb-path").value.trim() || "aircraft_db.json",
+      auto_download: document.getElementById("cfg-mildb-autodownload").checked,
+    },
     receivers: collectReceiverList(),
   };
 
@@ -3281,6 +3345,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       updateWeatherLayer();
       aircraftTTL = payload.aircraft_ttl;
       alertConfig = { ...payload.alerts, discord_webhook_set: !!(payload.alerts.discord_webhook || "").trim() };
+      reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
       showToast("Settings saved", "success");
     } else {
       gainSaving = false;
@@ -3919,6 +3984,13 @@ let alertConfig = {
   rules: {{ config.alerts.rules | tojson }},
   watchlist: {{ config.alerts.watchlist | tojson }},
 };
+
+// Pull the authoritative military ICAO set from the optional database.
+// When the DB is disabled or empty the endpoint returns [], leaving
+// militaryDbIcaos as an empty Set so isMilitaryIcao() falls back to ranges.
+{% if config.military_db.enabled %}
+reloadMilitaryDbIcaos();
+{% endif %}
 const _prevSquawks = new Map();  // icao -> last seen squawk (for change detection)
 
 function isOnWatchlist(icao) {
@@ -3966,19 +4038,35 @@ const MIL_ICAO_RANGES = [
   [0x3B7000, 0x3B7FFF], // French military
   [0x7CF800, 0x7CFFFF], // Australian military (RAAF)
   [0xC87F00, 0xC87FFF], // Canadian military (RCAF)
-  [0x710000, 0x71FFFF], // South Korean military
-  // Note: India (0x800000–0x83FFFF) and Russia (0x140000–0x14FFFF) are the
-  // entire national civilian + military allocations, not military-only, so
-  // they are intentionally omitted to avoid flagging every civilian flight.
+  // Note: India (0x800000–0x83FFFF), Russia (0x140000–0x14FFFF), and
+  // South Korea (0x710000–0x71FFFF) are entire national civilian + military
+  // allocations, not military-only, so they are intentionally omitted to
+  // avoid flagging every civilian flight.
 ];
+// When the optional military aircraft database is loaded, this set holds the
+// authoritative per-tail military ICAOs. When empty, fall back to the range
+// heuristic above. The set is populated at startup and after a download/reload.
+let militaryDbIcaos = null; // null = not yet fetched, Set = loaded (possibly empty)
 function isMilitaryIcao(icao) {
   if (!icao) return false;
+  if (militaryDbIcaos && militaryDbIcaos.size > 0) {
+    return militaryDbIcaos.has(icao.toUpperCase());
+  }
   const hex = parseInt(icao, 16);
   if (Number.isNaN(hex)) return false;
   for (const [lo, hi] of MIL_ICAO_RANGES) {
     if (hex >= lo && hex <= hi) return true;
   }
   return false;
+}
+function reloadMilitaryDbIcaos() {
+  return fetch("/api/military_db/icaos")
+    .then(r => r.json())
+    .then(d => {
+      militaryDbIcaos = new Set((d.icaos || []).map(s => String(s).toUpperCase()));
+      return militaryDbIcaos.size;
+    })
+    .catch(() => { militaryDbIcaos = new Set(); return 0; });
 }
 const alertCooldown = new Map(); // key: "icao:ruleIdx" -> timestamp
 const alertedAircraft = new Set(); // icaos with active alerts
@@ -4233,6 +4321,84 @@ document.getElementById("btn-test-discord").addEventListener("click", (e) => {
     else showToast("Discord error: " + (d.error || "unknown"), "danger");
   })
   .catch(err => showToast("Discord test failed: " + err, "danger"));
+});
+
+// ============================================================
+// MILITARY AIRCRAFT DATABASE
+// ============================================================
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(2) + " MB";
+}
+function refreshMilitaryDbStatus() {
+  const el = document.getElementById("mildb-status");
+  if (!el) return;
+  fetch("/api/military_db/status")
+    .then(r => r.json())
+    .then(d => {
+      if (!d.available) { el.textContent = "Database not initialized."; return; }
+      const parts = [];
+      parts.push(d.exists ? `File: ${fmtBytes(d.size_bytes)}` : "File: not present");
+      parts.push(`Loaded: ${d.loaded_count.toLocaleString()} aircraft`);
+      if (d.file_mtime) {
+        const dt = new Date(d.file_mtime * 1000);
+        parts.push(`Updated: ${dt.toLocaleString()}`);
+      }
+      el.textContent = parts.join(" • ");
+    })
+    .catch(() => { el.textContent = "Status unavailable."; });
+}
+document.getElementById("btn-mildb-download").addEventListener("click", () => {
+  const btn = document.getElementById("btn-mildb-download");
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Downloading…';
+  // Save URL/path first so the server uses the in-input values
+  const payload = {
+    military_db: {
+      enabled: document.getElementById("cfg-mildb-enabled").checked,
+      url: document.getElementById("cfg-mildb-url").value.trim(),
+      path: document.getElementById("cfg-mildb-path").value.trim() || "aircraft_db.json",
+      auto_download: document.getElementById("cfg-mildb-autodownload").checked,
+    }
+  };
+  fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  .then(() => fetch("/api/military_db/download", { method: "POST" }))
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      showToast(`Downloaded ${fmtBytes(d.size_bytes)} • ${d.loaded.toLocaleString()} military aircraft`, "success");
+      reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
+    } else {
+      showToast("Download failed: " + (d.error || "unknown"), "danger");
+    }
+  })
+  .catch(err => showToast("Download failed: " + err, "danger"))
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    refreshMilitaryDbStatus();
+  });
+});
+document.getElementById("btn-mildb-reload").addEventListener("click", () => {
+  fetch("/api/military_db/load", { method: "POST" })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        showToast(`Reloaded ${d.loaded.toLocaleString()} military aircraft`, "success");
+        reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
+      } else {
+        showToast("Reload failed: " + (d.error || "unknown"), "danger");
+      }
+    })
+    .catch(err => showToast("Reload failed: " + err, "danger"))
+    .finally(refreshMilitaryDbStatus);
 });
 
 // ============================================================
@@ -4641,6 +4807,8 @@ function restartApp() {
   let histCurMode  = "heatmap"; // "playback" | "heatmap"
   let histSearch   = "";    // filter by ICAO or callsign substring
   let histTypeFilter = "";  // "" | "heli" | "A1".."C2" | "unknown"
+  let histAltOp    = "";    // "" | "above" | "below"
+  let histAltValue = 0;     // altitude threshold in feet
 
   const TRAIL_SEC  = 300;   // how many seconds of history to show per aircraft
   const STALE_SEC  = 120;   // hide aircraft seen more than this many seconds ago
@@ -4676,15 +4844,21 @@ function restartApp() {
   // ── Enter / exit ─────────────────────────────────────────
   function enterHistory() {
     histActive = true;
-    // Reset search + type filter
+    // Reset search + type + altitude filters
     histSearch = "";
     histTypeFilter = "";
+    histAltOp = "";
+    histAltValue = 0;
     const sEl = document.getElementById("hist-search");
     const sClr = document.getElementById("hist-search-clear");
     const sType = document.getElementById("hist-type-filter");
+    const sAltOp = document.getElementById("hist-alt-op");
+    const sAltVal = document.getElementById("hist-alt-value");
     if (sEl) sEl.value = "";
     if (sClr) sClr.style.display = "none";
     if (sType) sType.value = "";
+    if (sAltOp) sAltOp.value = "";
+    if (sAltVal) { sAltVal.value = ""; sAltVal.style.display = "none"; }
     const sCnt = document.getElementById("hist-search-count");
     if (sCnt) sCnt.textContent = "";
     document.body.classList.add("history-active");
@@ -4922,6 +5096,7 @@ function restartApp() {
     if (!histTypeFilter) return true;
     const meta = histMeta[icao] || {};
     const cat = (meta.category || "").toUpperCase();
+    if (histTypeFilter === "military") return isMilitaryIcao(icao);
     if (histTypeFilter === "heli") {
       // Match A7 OR callsign-based heuristic (rotorcraft often skip ID frames)
       if (cat === "A7") return true;
@@ -4931,12 +5106,24 @@ function restartApp() {
     return cat === histTypeFilter;
   }
 
+  function altMatches(altitude) {
+    if (!histAltOp || !(histAltValue > 0)) return true;
+    if (altitude == null) return false;
+    return histAltOp === "above" ? altitude >= histAltValue : altitude <= histAltValue;
+  }
+
+  function matchesAltAny(pts) {
+    if (!histAltOp || !(histAltValue > 0)) return true;
+    return pts.some(p => altMatches(p.altitude));
+  }
+
   function histDataFiltered() {
-    if (!histSearch && !histTypeFilter) return histData;
+    if (!histSearch && !histTypeFilter && !histAltOp) return histData;
     const q = histSearch.toLowerCase();
     const out = {};
     for (const [icao, pts] of Object.entries(histData)) {
       if (!matchesType(icao)) continue;
+      if (!matchesAltAny(pts)) continue;
       if (!histSearch) { out[icao] = pts; continue; }
       if (icao.toLowerCase().includes(q)) { out[icao] = pts; continue; }
       const meta = histMeta[icao] || {};
@@ -4952,6 +5139,10 @@ function restartApp() {
     for (const [icao, pts] of Object.entries(data)) {
       const pos = getAircraftAtTime(pts, ts);
       if (!pos) continue;
+      // Hide marker at frames where the current altitude fails the filter.
+      // The aircraft remains in the filtered set (counted in matches) — only
+      // its rendering is gated on per-frame altitude.
+      if (!altMatches(pos.altitude)) continue;
       visible.add(icao);
       const ll = [pos.lat, pos.lon];
       // Build a pseudo-aircraft object for makeIcon(); fill in the most-recent
@@ -5128,19 +5319,44 @@ function restartApp() {
       histTypeFilter = typeEl.value || "";
       applySearch();
     });
+
+    // Altitude filter — operator + value
+    const altOpEl = document.getElementById("hist-alt-op");
+    const altValEl = document.getElementById("hist-alt-value");
+    let altDebounce = null;
+    const applyAltFilter = () => {
+      histAltOp = altOpEl.value || "";
+      histAltValue = parseFloat(altValEl.value) || 0;
+      applySearch();
+    };
+    altOpEl.addEventListener("change", () => {
+      altValEl.style.display = altOpEl.value ? "" : "none";
+      if (!altOpEl.value) altValEl.value = "";
+      applyAltFilter();
+      if (altOpEl.value) altValEl.focus();
+    });
+    altValEl.addEventListener("input", () => {
+      clearTimeout(altDebounce);
+      altDebounce = setTimeout(applyAltFilter, 150);
+    });
   });
+
+  function altLabel() {
+    if (!histAltOp || !(histAltValue > 0)) return "";
+    return `alt ${histAltOp} ${histAltValue.toLocaleString()}ft`;
+  }
 
   function updateSearchCount() {
     const el = document.getElementById("hist-search-count");
     if (!el) return;
-    if (!histSearch && !histTypeFilter) { el.textContent = ""; return; }
+    if (!histSearch && !histTypeFilter && !altLabel()) { el.textContent = ""; return; }
     const matches = Object.keys(histDataFiltered()).length;
     el.textContent = `${matches} match${matches === 1 ? "" : "es"}`;
   }
 
   function applySearch() {
     if (!histActive) return;
-    const filterActive = histSearch || histTypeFilter;
+    const filterActive = histSearch || histTypeFilter || altLabel();
     // No filter at all — refresh current mode
     if (!filterActive) {
       if (histCurMode === "heatmap") loadHeatmap();
@@ -5152,9 +5368,11 @@ function restartApp() {
       return;
     }
     // Active filter — move to playback, jump to first matching ts
-    const queryLabel = histSearch
-      ? `"${histSearch}"${histTypeFilter ? " + " + histTypeFilter : ""}`
-      : `type=${histTypeFilter}`;
+    const queryParts = [];
+    if (histSearch) queryParts.push(`"${histSearch}"`);
+    if (histTypeFilter) queryParts.push(`type=${histTypeFilter}`);
+    if (altLabel()) queryParts.push(altLabel());
+    const queryLabel = queryParts.join(" + ");
     const jumpToFirstHit = () => {
       const filtered = histDataFiltered();
       const matches = Object.keys(filtered);
@@ -5182,7 +5400,7 @@ function restartApp() {
         histCur = firstTs;
         updateSlider();
         renderPlaybackAt(histCur);
-        setStatus(`"${histSearch}": ${matches.length} aircraft — first seen ${fmtTs(firstTs)}`);
+        setStatus(`${queryLabel}: ${matches.length} aircraft — first seen ${fmtTs(firstTs)}`);
       }
     };
     if (!Object.keys(histData).length) {

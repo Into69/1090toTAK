@@ -181,6 +181,16 @@ def main():
     store.start_purge_thread()
     registry.on_update(store.record)
 
+    # ── Military aircraft database (optional) ─────────────────
+    from aircraft.military_db import MilitaryDB
+    military_db = MilitaryDB(config.military_db.path)
+    if config.military_db.enabled:
+        if os.path.exists(config.military_db.path):
+            military_db.load()
+        elif config.military_db.auto_download:
+            log.info("MilitaryDB: not present; downloading from %s", config.military_db.url)
+            military_db.download(config.military_db.url)
+
     # ── ADS-B receiver ────────────────────────────────────────
     if config.receivers:
         from receivers.manager import MultiReceiverManager
@@ -214,7 +224,7 @@ def main():
 
     # ── Web server ────────────────────────────────────────────
     from web.server import create_app
-    app = create_app(config, registry, tak_sender, receiver, server_manager, store, gpsd)
+    app = create_app(config, registry, tak_sender, receiver, server_manager, store, gpsd, military_db)
 
     log.info("Web UI: http://localhost:%d", config.web.port)
     log.info("Press Ctrl+C to stop")

@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 _web_dir = Path(__file__).parent
 
 
-def create_app(config: AppConfig, registry: AircraftRegistry, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None):
+def create_app(config: AppConfig, registry: AircraftRegistry, tak_sender=None, receiver=None, server_manager=None, store=None, gpsd_client=None, military_db=None):
     from .events import create_lifespan, setup_websocket
 
     lifespan = create_lifespan(config, registry, receiver)
@@ -34,7 +34,7 @@ def create_app(config: AppConfig, registry: AircraftRegistry, tak_sender=None, r
     app.mount("/static", StaticFiles(directory=str(_web_dir / "static")), name="static")
 
     from .routes import create_router
-    router = create_router(config, registry, templates, tak_sender, receiver, server_manager, store, gpsd_client)
+    router = create_router(config, registry, templates, tak_sender, receiver, server_manager, store, gpsd_client, military_db)
     app.include_router(router)
 
     setup_websocket(app, config, registry, receiver)

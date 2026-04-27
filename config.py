@@ -115,6 +115,16 @@ class AlertConfig:
 
 
 @dataclass
+class MilitaryDBConfig:
+    enabled: bool = False
+    # Mictronics aircraft DB: {ICAO: [reg, type, flags_hex]}. Pinned to a
+    # known-good commit so the URL doesn't drift or 404.
+    url: str = "https://raw.githubusercontent.com/Mictronics/readsb-protobuf/6a0b01207e0d17c09284b8f3d71ccd013232dcdf/webapp/src/db/aircrafts.json"
+    path: str = "aircraft_db.json"
+    auto_download: bool = False  # pull on startup if missing
+
+
+@dataclass
 class AppConfig:
     receiver: ReceiverConfig = field(default_factory=ReceiverConfig)
     tak: TAKConfig = field(default_factory=TAKConfig)
@@ -123,6 +133,7 @@ class AppConfig:
     update: UpdateConfig = field(default_factory=UpdateConfig)
     location: LocationConfig = field(default_factory=LocationConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
+    military_db: MilitaryDBConfig = field(default_factory=MilitaryDBConfig)
     receivers: list = field(default_factory=list)  # [{id, label, enabled, type, host, ...}]
     aircraft_ttl: int = 60
     history_ttl: int = 86400
@@ -164,6 +175,7 @@ def load_config() -> AppConfig:
         update=UpdateConfig(**_filter_fields(UpdateConfig, merged.get("update", {}))),
         location=LocationConfig(**_filter_fields(LocationConfig, merged.get("location", {}))),
         alerts=AlertConfig(**_filter_fields(AlertConfig, merged.get("alerts", {}))),
+        military_db=MilitaryDBConfig(**_filter_fields(MilitaryDBConfig, merged.get("military_db", {}))),
         receivers=merged.get("receivers", []),
         aircraft_ttl=merged["aircraft_ttl"],
         history_ttl=merged["history_ttl"],
@@ -218,6 +230,11 @@ def update_config_from_dict(cfg: AppConfig, data: dict) -> None:
         for k, v in a.items():
             if hasattr(cfg.alerts, k):
                 setattr(cfg.alerts, k, v)
+    if "military_db" in data:
+        m = data["military_db"]
+        for k, v in m.items():
+            if hasattr(cfg.military_db, k):
+                setattr(cfg.military_db, k, v)
     if "aircraft_ttl" in data:
         cfg.aircraft_ttl = int(data["aircraft_ttl"])
     if "history_ttl" in data:
