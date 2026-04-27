@@ -312,6 +312,15 @@
     }
     body.history-active #history-panel { display: block; }
     body.history-active #sidebar       { display: none !important; }
+    /* Shift the Leaflet zoom controls and the zoom indicator below the
+       history panel so they remain visible/clickable. The offset is set
+       dynamically from the measured panel height — see enterHistory(). */
+    body.history-active .leaflet-top.leaflet-left {
+      top: var(--hist-panel-h, 110px);
+    }
+    body.history-active #zoom-indicator {
+      top: calc(var(--hist-panel-h, 110px) + 12px);
+    }
     .hist-row {
       display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
       font-size: 0.75rem;
@@ -4862,6 +4871,21 @@ function restartApp() {
     const sCnt = document.getElementById("hist-search-count");
     if (sCnt) sCnt.textContent = "";
     document.body.classList.add("history-active");
+    // Measure the history panel and publish its height so the zoom controls
+    // and indicator can be offset below it. A ResizeObserver keeps the offset
+    // current when controls wrap on narrow viewports.
+    const panelEl = document.getElementById("history-panel");
+    const _measure = () => {
+      if (!panelEl) return;
+      const h = panelEl.getBoundingClientRect().height;
+      if (h > 0) document.documentElement.style.setProperty("--hist-panel-h", h + "px");
+    };
+    _measure();
+    requestAnimationFrame(_measure);
+    if (panelEl && !panelEl._sizeObs && window.ResizeObserver) {
+      panelEl._sizeObs = new ResizeObserver(_measure);
+      panelEl._sizeObs.observe(panelEl);
+    }
     // Close any open popups (aircraft, sensor, etc.)
     map.closePopup();
     // Hide weather overlay while in history mode
