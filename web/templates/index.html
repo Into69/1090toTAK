@@ -5461,11 +5461,12 @@ function restartApp() {
     if (histCur >= histEnd) histCur = histStart;
     histPlaying = true;
     document.getElementById("hist-play-btn").textContent = "⏸";
-    const speed = parseInt(document.getElementById("hist-speed").value) || 300;
+    // Re-read the speed select on every tick so changes apply mid-playback
+    const speedEl = document.getElementById("hist-speed");
     const tickMs = 100;
-    const advanceSec = speed * tickMs / 1000;
     histTimer = setInterval(() => {
-      histCur += advanceSec;
+      const speed = parseInt(speedEl.value) || 300;
+      histCur += speed * tickMs / 1000;
       if (histCur >= histEnd) {
         histCur = histEnd;
         updateSlider();
