@@ -1,15 +1,25 @@
 """
-Military aircraft database loader.
+Military / VVIP aircraft database loader.
 
-Uses the Mictronics aircraft database (mirrored by wiedehopf/tar1090-db) to
-identify military aircraft by exact ICAO match. The database is a gzipped CSV
-with one row per known aircraft and a 'dbFlags' bitfield where bit 0 (& 1)
-indicates military.
+Loads two ICAO sets from a flag-encoded aircraft database:
+  • Military — heads-of-state-rare-but-not-unique military tails
+  • VVIP / "interesting" — presidential, government, notable special airframes
 
-Range-based detection (the fallback used when this DB is disabled) is best-
-effort and produces false positives in countries that mix military and
-civilian aircraft within a single national allocation. The DB resolves that
-by giving an authoritative per-tail flag.
+Bit semantics differ between supported source formats:
+
+  Mictronics aircrafts.json (default):
+    flags is a hex string per row.
+      bit 4 (0x10) → military
+      bit 0 (0x01) → VVIP / interesting
+
+  tar1090-db CSV (alternative source):
+    flags is a decimal integer per row.
+      bit 0 (0x01) → military
+      bit 1 (0x02) → VVIP / interesting
+
+Range-based detection (the fallback when no DB is loaded) is crude and
+produces false positives wherever a country mixes mil/civ in one allocation.
+The DB resolves that by giving an authoritative per-tail answer.
 """
 
 import csv
@@ -20,51 +30,76 @@ import os
 import threading
 import time
 import urllib.request
-from typing import Set
+from typing import Dict, Set, Optional
 
 log = logging.getLogger(__name__)
 
 
-def _parse_json(fileobj) -> Set[str]:
-    """Parse the Mictronics aircrafts.json format: {ICAO: [reg, type, flags]}.
+def _parse_json(fileobj):
+    """Parse the Mictronics aircrafts.json format: {ICAO: [reg, type, flags, desc?]}.
 
-    `flags` is a 2-char hex string where bit 0 (& 1) indicates military. The
-    tar1090-db CSV uses the same bit but encodes the number in decimal — this
-    parser normalizes both ("FF" hex and "255" decimal both become 255).
+    `flags` is a hex string. In Mictronics' encoding bit 4 (0x10) flags
+    military, bit 0 (0x01) flags VVIP / "interesting". Returns
+    (records, military_set, vvip_set) where records is a dict keyed by
+    upper-case ICAO with {reg, type, flags, desc?} per entry.
     """
     data = json.load(fileobj)
+    records: Dict[str, dict] = {}
     military: Set[str] = set()
+    vvip: Set[str] = set()
     if not isinstance(data, dict):
-        return military
+        return records, military, vvip
     for icao, row in data.items():
         if not isinstance(icao, str) or len(icao) != 6:
             continue
+        reg = type_ = desc = None
         flags = None
-        if isinstance(row, list) and len(row) >= 3:
-            flags = row[2]
+        if isinstance(row, list):
+            if len(row) >= 1: reg = row[0] or None
+            if len(row) >= 2: type_ = row[1] or None
+            if len(row) >= 3: flags = row[2]
+            if len(row) >= 4: desc = row[3] or None
         elif isinstance(row, dict):
+            reg = row.get("reg") or row.get("r") or None
+            type_ = row.get("type") or row.get("t") or None
+            desc = row.get("desc") or row.get("d") or None
             flags = row.get("flags") or row.get("dbFlags")
         if isinstance(flags, str):
             try:
                 flags = int(flags, 16)
             except ValueError:
-                continue
-        if isinstance(flags, int) and flags & 1:
-            military.add(icao.upper())
-    return military
+                flags = None
+        if not isinstance(flags, int):
+            flags = 0
+        up = icao.upper()
+        is_mil = bool(flags & 0x10)
+        is_vvip = bool(flags & 0x01)
+        rec = {"reg": reg, "type": type_, "flags": flags,
+               "is_military": is_mil, "is_vvip": is_vvip}
+        if desc:
+            rec["desc"] = desc
+        records[up] = rec
+        if is_mil:  military.add(up)
+        if is_vvip: vvip.add(up)
+    return records, military, vvip
 
 
-def _parse_csv(fileobj) -> Set[str]:
-    """Parse the tar1090-db aircraft CSV. Tolerates either ',' or ';' delimiters
-    and whatever column ordering as long as one column looks like a 6-hex ICAO
-    and another column parses as an integer flags bitfield (bit 0 = military)."""
+def _parse_csv(fileobj):
+    """Parse the tar1090-db aircraft CSV. Bit 0 (& 1) = military, bit 1 (& 2)
+    = VVIP / interesting. Tolerates either ',' or ';' delimiters and whatever
+    column ordering. Returns (records, military_set, vvip_set). Registration /
+    type columns are best-effort: the first non-numeric, non-ICAO column is
+    treated as registration and the second as type."""
     sample = fileobj.read(4096)
     fileobj.seek(0)
     delim = ";" if sample.count(";") > sample.count(",") else ","
     reader = csv.reader(fileobj, delimiter=delim)
+    records: Dict[str, dict] = {}
     military: Set[str] = set()
+    vvip: Set[str] = set()
     icao_col = None
     flag_col = None
+    text_cols: list = []
     for row in reader:
         if not row:
             continue
@@ -88,6 +123,8 @@ def _parse_csv(fileobj) -> Set[str]:
                 # No numeric column on this row — skip and try next
                 icao_col = None
                 continue
+            text_cols = [i for i in range(len(row))
+                         if i != icao_col and i != flag_col][:2]
         if icao_col >= len(row) or flag_col >= len(row):
             continue
         icao = row[icao_col].strip().upper()
@@ -96,15 +133,24 @@ def _parse_csv(fileobj) -> Set[str]:
         flag_str = row[flag_col].strip()
         if not flag_str.isdigit():
             continue
-        if int(flag_str) & 1:
-            military.add(icao)
-    return military
+        n = int(flag_str)
+        reg  = row[text_cols[0]].strip() if text_cols and text_cols[0] < len(row) else None
+        typ  = row[text_cols[1]].strip() if len(text_cols) > 1 and text_cols[1] < len(row) else None
+        is_mil  = bool(n & 0x01)
+        is_vvip = bool(n & 0x02)
+        records[icao] = {"reg": reg or None, "type": typ or None, "flags": n,
+                         "is_military": is_mil, "is_vvip": is_vvip}
+        if is_mil:  military.add(icao)
+        if is_vvip: vvip.add(icao)
+    return records, military, vvip
 
 
 class MilitaryDB:
     def __init__(self, path: str):
         self._path = path
+        self._records: Dict[str, dict] = {}
         self._military: Set[str] = set()
+        self._vvip: Set[str] = set()
         self._loaded_at: float = 0.0
         self._lock = threading.Lock()
 
@@ -117,7 +163,8 @@ class MilitaryDB:
             self._path = path
 
     def load(self) -> int:
-        """Load military ICAOs from the on-disk file. Returns the count."""
+        """Load military + VVIP ICAOs from the on-disk file. Returns the
+        military count (kept as the headline number for backward compat)."""
         path = self._path
         if not os.path.exists(path):
             log.info("MilitaryDB: file not present at %s", path)
@@ -128,15 +175,25 @@ class MilitaryDB:
             inner = path[:-3] if path.endswith(".gz") else path
             is_json = inner.endswith(".json")
             with opener(path, "rt", encoding="utf-8", errors="ignore") as f:
-                military = _parse_json(f) if is_json else _parse_csv(f)
+                records, military, vvip = _parse_json(f) if is_json else _parse_csv(f)
         except Exception as e:
             log.warning("MilitaryDB: load error: %s", e)
             return 0
         with self._lock:
+            self._records = records
             self._military = military
+            self._vvip = vvip
             self._loaded_at = time.time()
-        log.info("MilitaryDB: loaded %d military aircraft from %s", len(military), path)
+        log.info("MilitaryDB: loaded %d records (%d military + %d VVIP) from %s",
+                 len(records), len(military), len(vvip), path)
         return len(military)
+
+    def lookup(self, icao: str) -> Optional[dict]:
+        """Return per-tail metadata if this ICAO is in the DB, else None."""
+        if not icao:
+            return None
+        with self._lock:
+            return self._records.get(icao.upper())
 
     def is_military(self, icao: str) -> bool:
         if not icao:
@@ -144,13 +201,27 @@ class MilitaryDB:
         with self._lock:
             return icao.upper() in self._military
 
+    def is_vvip(self, icao: str) -> bool:
+        if not icao:
+            return False
+        with self._lock:
+            return icao.upper() in self._vvip
+
     def count(self) -> int:
         with self._lock:
             return len(self._military)
 
+    def vvip_count(self) -> int:
+        with self._lock:
+            return len(self._vvip)
+
     def icaos(self) -> list:
         with self._lock:
             return sorted(self._military)
+
+    def vvip_icaos(self) -> list:
+        with self._lock:
+            return sorted(self._vvip)
 
     def status(self) -> dict:
         path = self._path
@@ -166,6 +237,7 @@ class MilitaryDB:
             "size_bytes": size,
             "file_mtime": mtime,
             "loaded_count": self.count(),
+            "vvip_count": self.vvip_count(),
             "loaded_at": self._loaded_at,
         }
 

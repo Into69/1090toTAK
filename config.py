@@ -107,6 +107,7 @@ class AlertConfig:
     auto_select: bool = False
     emergency_squawks: bool = True
     military: bool = False       # Alert on aircraft from known military ICAO ranges
+    vvip: bool = False           # Alert on VVIP / "interesting" aircraft (DB bit 0)
     helicopters: bool = False    # Alert on rotorcraft (ADS-B emitter category A7)
     squawk_change: bool = False  # Alert when an aircraft changes its transponder squawk
     discord_webhook: str = ""    # Discord webhook URL for alert notifications

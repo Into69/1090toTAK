@@ -537,6 +537,7 @@
                 title="Filter by aircraft type">
           <option value="">All types</option>
           <option value="military">Military</option>
+          <option value="vvip">VVIP / interesting</option>
           <option value="heli">Helicopter / rotorcraft</option>
           <option value="A1">Light fixed-wing</option>
           <option value="A2">Small fixed-wing</option>
@@ -1373,6 +1374,15 @@
                   </label>
                 </div>
               </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="cfg-alerts-vvip"/>
+                  <label class="form-check-label" for="cfg-alerts-vvip">
+                    VVIP / interesting aircraft
+                    <span style="color:#8899aa;font-size:0.72rem;display:block;">Presidential, government, and other notable airframes. Requires the aircraft database below.</span>
+                  </label>
+                </div>
+              </div>
               <div class="col-12 border-top border-secondary pt-2 mt-1">
                 <div class="form-check form-switch">
                   <input class="form-check-input" type="checkbox" id="cfg-mildb-enabled"/>
@@ -2159,6 +2169,18 @@ async function fetchAircraftPhoto(icao) {
   }
 }
 
+// Cache of per-ICAO database records. null = miss (not in DB), object = hit.
+const _aircraftDbCache = new Map();
+function fetchAircraftDb(icao) {
+  if (!icao) return Promise.resolve(null);
+  const key = icao.toUpperCase();
+  if (_aircraftDbCache.has(key)) return Promise.resolve(_aircraftDbCache.get(key));
+  return fetch(`/api/aircraft_db/${key}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { _aircraftDbCache.set(key, d); return d; })
+    .catch(() => { _aircraftDbCache.set(key, null); return null; });
+}
+
 function renderDetail(ac) {
   const panel = document.getElementById("detail-panel");
   if (!ac) {
@@ -2175,6 +2197,8 @@ function renderDetail(ac) {
   const rows = [
     ["ICAO",     ac.icao],
     ["Callsign", fmtCallsign(ac.callsign, false)],
+    ['<span data-tooltip="Per-tail metadata sourced from the optional aircraft database. Hover the individual values for details." style="cursor:help;border-bottom:1px dotted #555;">DB record</span>',
+     '<span id="ac-db-row" style="color:#555;">…</span>'],
     ["Category", catLabel],
     ["Position", ac.lat != null ? `${ac.lat.toFixed(4)}, ${ac.lon.toFixed(4)}` : "—"],
     ["Altitude", ac.altitude != null ? `${ac.altitude.toLocaleString()} ft` : "—"],
@@ -2220,6 +2244,39 @@ function renderDetail(ac) {
     if (!el || selectedIcao !== ac.icao) return;
     if (url) {
       el.innerHTML = `<img src="${url}" alt="" style="max-width:100%;max-height:120px;border-radius:4px;border:1px solid #2c2f33;margin-bottom:6px;" onerror="this.parentElement.innerHTML=''"/>`;
+    }
+  });
+
+  // Fill in the DB-record row asynchronously. Bail out if the user has
+  // since selected a different aircraft (selectedIcao for live mode,
+  // histSelectedIcao for history playback).
+  fetchAircraftDb(ac.icao).then(rec => {
+    const el = document.getElementById("ac-db-row");
+    if (!el) return;
+    const stillCurrent = (selectedIcao === ac.icao) ||
+                         (typeof histSelectedIcao !== "undefined" && histSelectedIcao === ac.icao);
+    if (!stillCurrent) return;
+    if (!rec) {
+      // Hide the row entirely on a miss — it's noise for unknown tails
+      const wrap = el.closest(".detail-row");
+      if (wrap) wrap.style.display = "none";
+      return;
+    }
+    const TT_REG  = "Tail number / civil registration assigned to this airframe in the aircraft database.";
+    const TT_TYPE = "ICAO aircraft type designator (e.g. B737, C130, EC45). Identifies the airframe model independently of the operator.";
+    const TT_MIL  = "Database flag: this ICAO is registered to a military operator.";
+    const TT_VVIP = "Database flag: VVIP / 'interesting' airframe — head-of-state, government, or otherwise notable. Often a civilian-registered tail flown for state purposes.";
+    const TT_DESC = "Free-form note from the aircraft database — usually a model variant or operator detail.";
+    const bits = [];
+    if (rec.reg)  bits.push(`<span data-tooltip="${TT_REG}"><b>${rec.reg}</b></span>`);
+    if (rec.type) bits.push(`<span data-tooltip="${TT_TYPE}">${rec.type}</span>`);
+    const badges = [];
+    if (rec.is_military) badges.push(`<span class="badge bg-danger" style="font-size:0.6rem;cursor:help;" data-tooltip="${TT_MIL}">MIL</span>`);
+    if (rec.is_vvip)     badges.push(`<span class="badge bg-warning text-dark" style="font-size:0.6rem;cursor:help;" data-tooltip="${TT_VVIP}">VVIP</span>`);
+    if (badges.length) bits.push(badges.join(" "));
+    el.innerHTML = bits.length ? bits.join(" • ") : "—";
+    if (rec.desc) {
+      el.innerHTML += `<div style="color:#8899aa;font-size:0.7rem;margin-top:2px;cursor:help;" data-tooltip="${TT_DESC}">${rec.desc}</div>`;
     }
   });
 }
@@ -3040,6 +3097,7 @@ function loadSettingsForm(cfg) {
   document.getElementById("cfg-alerts-enabled").checked = cfg.alerts?.enabled ?? true;
   document.getElementById("cfg-alerts-emergency").checked = cfg.alerts?.emergency_squawks ?? true;
   document.getElementById("cfg-alerts-military").checked = cfg.alerts?.military || false;
+  document.getElementById("cfg-alerts-vvip").checked = cfg.alerts?.vvip || false;
   document.getElementById("cfg-alerts-helicopters").checked = cfg.alerts?.helicopters || false;
   document.getElementById("cfg-alerts-squawk-change").checked = cfg.alerts?.squawk_change || false;
   document.getElementById("cfg-alerts-autoselect").checked = cfg.alerts?.auto_select || false;
@@ -3334,6 +3392,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       enabled: document.getElementById("cfg-alerts-enabled").checked,
       emergency_squawks: document.getElementById("cfg-alerts-emergency").checked,
       military: document.getElementById("cfg-alerts-military").checked,
+      vvip: document.getElementById("cfg-alerts-vvip").checked,
       helicopters: document.getElementById("cfg-alerts-helicopters").checked,
       squawk_change: document.getElementById("cfg-alerts-squawk-change").checked,
       auto_select: document.getElementById("cfg-alerts-autoselect").checked,
@@ -3381,6 +3440,7 @@ document.getElementById("save-settings-btn").addEventListener("click", () => {
       aircraftTTL = payload.aircraft_ttl;
       alertConfig = { ...payload.alerts, discord_webhook_set: !!(payload.alerts.discord_webhook || "").trim() };
       reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
+      reloadVvipDbIcaos();
       showToast("Settings saved", "success");
     } else {
       gainSaving = false;
@@ -4013,6 +4073,7 @@ let alertConfig = {
   auto_select: {{ 'true' if config.alerts.auto_select else 'false' }},
   emergency_squawks: {{ 'true' if config.alerts.emergency_squawks else 'false' }},
   military: {{ 'true' if config.alerts.military else 'false' }},
+  vvip: {{ 'true' if config.alerts.vvip else 'false' }},
   helicopters: {{ 'true' if config.alerts.helicopters else 'false' }},
   squawk_change: {{ 'true' if config.alerts.squawk_change else 'false' }},
   discord_webhook_set: {{ 'true' if config.alerts.discord_webhook else 'false' }},
@@ -4025,6 +4086,7 @@ let alertConfig = {
 // militaryDbIcaos as an empty Set so isMilitaryIcao() falls back to ranges.
 {% if config.military_db.enabled %}
 reloadMilitaryDbIcaos();
+reloadVvipDbIcaos();
 {% endif %}
 const _prevSquawks = new Map();  // icao -> last seen squawk (for change detection)
 
@@ -4103,6 +4165,24 @@ function reloadMilitaryDbIcaos() {
     })
     .catch(() => { militaryDbIcaos = new Set(); return 0; });
 }
+
+// VVIP / "interesting" set — presidential, government, notable special airframes.
+// Sourced from the military DB's bit-0 flag when the DB is enabled. Has no
+// range-based fallback (range guesses are too noisy for this category).
+let vvipDbIcaos = null;
+function isVvipIcao(icao) {
+  if (!icao || !vvipDbIcaos) return false;
+  return vvipDbIcaos.has(icao.toUpperCase());
+}
+function reloadVvipDbIcaos() {
+  return fetch("/api/military_db/vvip_icaos")
+    .then(r => r.json())
+    .then(d => {
+      vvipDbIcaos = new Set((d.icaos || []).map(s => String(s).toUpperCase()));
+      return vvipDbIcaos.size;
+    })
+    .catch(() => { vvipDbIcaos = new Set(); return 0; });
+}
 const alertCooldown = new Map(); // key: "icao:ruleIdx" -> timestamp
 const alertedAircraft = new Set(); // icaos with active alerts
 const ALERT_COOLDOWN_MS = 60000;
@@ -4129,6 +4209,16 @@ function checkAlerts(ac) {
     if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
       alertCooldown.set(key, now);
       fireAlert(ac, "Military aircraft");
+      matched = true;
+    }
+  }
+
+  // VVIP / interesting (DB-only — has no range fallback)
+  if (alertConfig.vvip && isVvipIcao(ac.icao)) {
+    const key = ac.icao + ":vvip";
+    if (!alertCooldown.has(key) || now - alertCooldown.get(key) > ALERT_COOLDOWN_MS) {
+      alertCooldown.set(key, now);
+      fireAlert(ac, "VVIP / interesting aircraft");
       matched = true;
     }
   }
@@ -4376,7 +4466,8 @@ function refreshMilitaryDbStatus() {
       if (!d.available) { el.textContent = "Database not initialized."; return; }
       const parts = [];
       parts.push(d.exists ? `File: ${fmtBytes(d.size_bytes)}` : "File: not present");
-      parts.push(`Loaded: ${d.loaded_count.toLocaleString()} aircraft`);
+      parts.push(`Loaded: ${d.loaded_count.toLocaleString()} military` +
+                 (d.vvip_count ? ` + ${d.vvip_count.toLocaleString()} VVIP` : ""));
       if (d.file_mtime) {
         const dt = new Date(d.file_mtime * 1000);
         parts.push(`Updated: ${dt.toLocaleString()}`);
@@ -4410,6 +4501,7 @@ document.getElementById("btn-mildb-download").addEventListener("click", () => {
     if (d.ok) {
       showToast(`Downloaded ${fmtBytes(d.size_bytes)} • ${d.loaded.toLocaleString()} military aircraft`, "success");
       reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
+      reloadVvipDbIcaos();
     } else {
       showToast("Download failed: " + (d.error || "unknown"), "danger");
     }
@@ -4428,6 +4520,7 @@ document.getElementById("btn-mildb-reload").addEventListener("click", () => {
       if (d.ok) {
         showToast(`Reloaded ${d.loaded.toLocaleString()} military aircraft`, "success");
         reloadMilitaryDbIcaos().then(() => refreshAllMarkers());
+      reloadVvipDbIcaos();
       } else {
         showToast("Reload failed: " + (d.error || "unknown"), "danger");
       }
@@ -5247,6 +5340,7 @@ function restartApp() {
     const meta = histMeta[icao] || {};
     const cat = (meta.category || "").toUpperCase();
     if (histTypeFilter === "military") return isMilitaryIcao(icao);
+    if (histTypeFilter === "vvip") return isVvipIcao(icao);
     if (histTypeFilter === "heli") {
       // Match A7 OR callsign-based heuristic (rotorcraft often skip ID frames)
       if (cat === "A7") return true;

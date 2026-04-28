@@ -610,6 +610,24 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             return {"icaos": []}
         return {"icaos": military_db.icaos()}
 
+    @router.get("/api/military_db/vvip_icaos")
+    def military_db_vvip_icaos():
+        if military_db is None or not config.military_db.enabled:
+            return {"icaos": []}
+        return {"icaos": military_db.vvip_icaos()}
+
+    @router.get("/api/aircraft_db/{icao}")
+    def aircraft_db_lookup(icao: str):
+        """Per-tail database record (registration, type, flags, optional desc).
+        Returns 404 when the DB isn't loaded or the ICAO isn't known so the
+        client can quietly skip the row."""
+        if military_db is None or not config.military_db.enabled:
+            raise HTTPException(status_code=404, detail="db not enabled")
+        rec = military_db.lookup(icao)
+        if not rec:
+            raise HTTPException(status_code=404, detail="not in db")
+        return {"icao": icao.upper(), **rec}
+
     @router.post("/api/military_db/download")
     def military_db_download():
         if military_db is None:
