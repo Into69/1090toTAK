@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual"/>
   <title>1090toTAK v{{ version }}</title>
 
+  <!-- App icons -->
+  <link rel="icon" href="/favicon.ico" sizes="any"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png"/>
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png"/>
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <meta name="theme-color" content="#000000"/>
+  <meta name="apple-mobile-web-app-title" content="1090toTAK"/>
+
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <!-- Bootstrap -->
@@ -472,7 +480,7 @@
 <!-- Navbar -->
 <nav class="navbar navbar-dark bg-black navbar-expand-lg px-3">
   <span class="navbar-brand">
-    <i class="bi bi-airplane-fill me-1" style="color:#4e8fd6"></i> 1090toTAK <span style="font-size:0.65rem;color:#556;font-weight:400;letter-spacing:0;">v{{ version }}</span>
+    <img src="/static/icons/logo-64.png" alt="" width="30" height="30" class="me-1" style="vertical-align:middle;margin-top:-3px;"/> 1090toTAK <span style="font-size:0.65rem;color:#556;font-weight:400;letter-spacing:0;">v{{ version }}</span>
   </span>
   <div class="d-flex align-items-center ms-auto gap-2">
     <span id="nav-receiver-badge" class="badge bg-secondary">--</span>

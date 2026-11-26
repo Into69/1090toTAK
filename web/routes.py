@@ -96,6 +96,21 @@ def create_router(config: AppConfig, registry: AircraftRegistry, templates: Jinj
             headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
         )
 
+    @router.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse(
+            str(_web_dir / "static" / "icons" / "favicon.ico"),
+            media_type="image/x-icon",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @router.get("/manifest.webmanifest", include_in_schema=False)
+    def web_manifest():
+        return FileResponse(
+            str(_web_dir / "static" / "manifest.webmanifest"),
+            media_type="application/manifest+json",
+        )
+
     @router.get("/api/aircraft")
     def get_aircraft():
         return registry.get_all_dicts()
